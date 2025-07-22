@@ -1,4 +1,4 @@
-from client import Client
+from dynostore.client import Client
 
 data = "abc"
 data_bytes = data.encode("utf-8")

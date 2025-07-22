@@ -4,9 +4,9 @@ import time
 import hashlib
 import io
 import json
-from nfrs.compress import ObjectCompressor
-from nfrs.cipher import SecureObjectStore
-from auth.authenticate import DeviceAuthenticator
+from dynostore.nfrs.compress import ObjectCompressor
+from dynostore.nfrs.cipher import SecureObjectStore
+from dynostore.auth.authenticate import DeviceAuthenticator
 
 class Client(object):
 
