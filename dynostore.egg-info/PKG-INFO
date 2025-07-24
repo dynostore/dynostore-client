@@ -3,9 +3,9 @@ Name: dynostore
 Version: 0.0.1
 Summary: DynoStore client
 Author-email: "Dante D. Sanchez-Gallegos" <dantsanc@pa.uc3m.es>
-License-Expression: MIT
-Project-URL: Homepage, https://github.com/pypa/sampleproject
-Project-URL: Issues, https://github.com/pypa/sampleproject/issues
+License: MIT
+Project-URL: Homepage, https://github.com/dynostore/dynostore-client
+Project-URL: Issues, https://github.com/dynostore/dynostore-client/issues
 Classifier: Programming Language :: Python :: 3
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.9

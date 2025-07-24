@@ -15,6 +15,7 @@ class Client(object):
 
         self.object_compressor = ObjectCompressor()
         self.object_encrypter = SecureObjectStore("aaaa")
+        print(self.metadata_server)
         authenticator = DeviceAuthenticator(auth_url=self.metadata_server)
         authenticator.authenticate()
         self.token_data = authenticator.token_data
@@ -104,6 +105,7 @@ class Client(object):
         start_time = time.perf_counter_ns()
         data_hash = hashlib.sha3_256(data).hexdigest()
         name = data_hash if name is None else name
+        key = str(uuid.uuid4())
 
         put = requests.put if session is None else session.put
         data_compressed = self.object_compressor.compress(data)

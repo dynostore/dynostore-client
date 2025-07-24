@@ -1,1 +1,6 @@
+build
+dist
 dynostore
+testdata
+tests
+venv

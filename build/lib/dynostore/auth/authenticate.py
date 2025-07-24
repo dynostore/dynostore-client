@@ -6,7 +6,7 @@ class DeviceAuthenticator:
     def __init__(self, auth_url="http://localhost:8095", token_file="~/.mycli/token.json"):
         self.auth_url = f"http://{auth_url}" if not auth_url.startswith("http") else auth_url 
         self.token_file = os.path.expanduser(token_file)
-
+        
     def request_user_code(self):
         resp = requests.post(f"{self.auth_url}/device/code")
         resp.raise_for_status()

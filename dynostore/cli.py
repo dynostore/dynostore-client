@@ -1,6 +1,7 @@
 # dynostore/client/cli.py
 
 import argparse
+import os
 from dynostore.client import Client
 
 
@@ -21,6 +22,8 @@ def main():
         '--encrypt', action='store_true', help='Encrypt the data')
     put_parser.add_argument('--resiliency', type=int,
                             default=1, help='Resiliency level')
+    put_parser.add_argument('--recursive', action='store_true',
+                            help='Recursively upload directories')    
 
     # GET
     get_parser = subparsers.add_parser(
@@ -43,15 +46,39 @@ def main():
     client = Client(metadata_server=args.server)
 
     if args.command == 'put':
-        with open(args.file, 'rb') as f:
-            data = f.read()
-        result = client.put(
-            data=data, 
-            catalog=args.catalog, 
-            is_encrypted=args.encrypt, 
-            resiliency=args.resiliency
-        )
-        print("Upload successful:", result)
+        if args.recursive:
+            # Check if path is a directory
+            if not os.path.isdir(args.file):
+                print(f"Error: {args.file} is not a directory.")
+                return 1
+            # Recursively upload all files in the directory
+            files = []
+            for root, _, filenames in os.walk(args.file):
+                for filename in filenames:
+                    filepath = os.path.join(root, filename)
+                    relative_path = os.path.relpath(filepath, args.file)
+                    files.append((relative_path, filepath))
+            
+            for relative_path, filepath in files:
+                with open(filepath, 'rb') as f:
+                    data = f.read()
+                result = client.put(
+                    data=data, 
+                    catalog=args.catalog, 
+                    is_encrypted=args.encrypt, 
+                    resiliency=args.resiliency
+                )
+                print(f"Uploaded {relative_path}: {result}")
+        else:
+            with open(args.file, 'rb') as f:
+                data = f.read()
+            result = client.put(
+                data=data, 
+                catalog=args.catalog, 
+                is_encrypted=args.encrypt, 
+                resiliency=args.resiliency
+            )
+            print("Upload successful:", result)
 
     elif args.command == 'get':
         data = client.get(args.key)
@@ -68,3 +95,7 @@ def main():
     elif args.command == 'evict':
         client.evict(args.key)
         print("Object evicted successfully.")
+
+
+if __name__ == '__main__':
+    main()
