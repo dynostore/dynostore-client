@@ -26,5 +26,8 @@ dependencies = [
 dynostore = "dynostore.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/pypa/sampleproject"
-Issues = "https://github.com/pypa/sampleproject/issues"
+Homepage = "https://github.com/dynostore/dynostore-client"
+Issues = "https://github.com/dynostore/dynostore-client/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
