@@ -17,12 +17,13 @@ classifiers = [
 ]
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
-
 dependencies = [
     "requests",
     "cryptography"
 ]
 
+[project.scripts]
+dynostore = "dynostore.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/pypa/sampleproject"
