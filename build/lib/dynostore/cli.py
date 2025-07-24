@@ -56,10 +56,13 @@ def main():
             for root, _, filenames in os.walk(args.file):
                 for filename in filenames:
                     filepath = os.path.join(root, filename)
+                    if not os.path.isfile(filepath):
+                        continue
                     relative_path = os.path.relpath(filepath, args.file)
                     files.append((relative_path, filepath))
             
             for relative_path, filepath in files:
+                print(f"Uploading {filepath}...")
                 with open(filepath, 'rb') as f:
                     data = f.read()
                 result = client.put(
