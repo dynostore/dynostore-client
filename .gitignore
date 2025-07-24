@@ -4,3 +4,4 @@ dynostore.egg-info/*
 build/*
 testdata/*
 
+testcat/*

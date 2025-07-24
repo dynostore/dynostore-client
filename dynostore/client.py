@@ -3,6 +3,7 @@ import uuid
 import time
 import hashlib
 import io
+import os
 import json
 from dynostore.nfrs.compress import ObjectCompressor
 from dynostore.nfrs.cipher import SecureObjectStore
@@ -90,6 +91,80 @@ class Client(object):
             data = self.object_compressor.decompress(data)
 
             return bytes(data)
+        
+    def get_metadata(
+        self,
+        key: str,
+        session: requests.Session = None
+    ) -> dict:
+
+        get_ = requests.get if session is None else session.get
+        response = get_(
+            f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}/exists'
+        )
+        if not response.ok:
+            raise requests.exceptions.RequestException(
+                f'Server returned HTTP error code {response.status_code}. '
+                f'{response.text}',
+                response=response,
+            )
+
+        return response.json()["metadata"]
+        
+    def get_files_in_catalog(
+            self,
+            catalog: str,
+            output_dir: str = None,
+            session: requests.Session = None
+    ) -> list:
+        # First get the medata of the catalog
+        get = requests.get if session is None else session.get
+        response = get(
+            f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
+        )
+
+        if response.status_code == 404:
+            raise requests.exceptions.RequestException(
+                f'DynoStore returned HTTP error code {response.status_code}. '
+                f'{response.text}',
+                response=response,
+            )
+        
+
+        if response.status_code == 200:
+            catalog_info = response.json()["data"]
+            catalog_key = catalog_info["tokencatalog"]
+            
+            # Now get the files in the catalog
+            response = get(
+                f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog_key}/list'
+            )
+
+            if response.status_code == 404:
+                raise requests.exceptions.RequestException(
+                    f'DynoStore returned HTTP error code {response.status_code}. '
+                    f'{response.text}',
+                    response=response,
+                )
+            if response.status_code == 201:
+                files = response.json()["data"]
+
+                os.makedirs(output_dir, exist_ok=True) 
+                
+                # Now iterate over the files and download them
+                for f in files:
+                    print("Getting file:", f["token_file"])
+                    key = f["token_file"]
+                    # Get the metadata of the file
+                    metadata = self.get_metadata(key, session=session)
+
+                    # Get the data of the file
+                    data = self.get(key, session=session)
+
+                    # Write the data to the output dir
+                    output_path = os.path.join(output_dir, metadata["name"])
+                    with open(output_path, "wb") as f:
+                        f.write(data)
 
     def put(
         self,

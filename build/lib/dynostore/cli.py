@@ -31,6 +31,13 @@ def main():
     get_parser.add_argument('key', help='Key of the object to download')
     get_parser.add_argument(
         '--output', help='Output file to write to (default: stdout)')
+    
+    # GET Catalog
+    get_parser = subparsers.add_parser(
+        'get_catalog', help='Get all objects in a catalog')
+    get_parser.add_argument('catalog', help='Catalog name to retrieve objects from')
+    get_parser.add_argument(
+        'output', help='Output directory to write the catalog to (default: stdout)')
 
     # EXISTS
     exists_parser = subparsers.add_parser(
@@ -69,7 +76,8 @@ def main():
                     data=data, 
                     catalog=args.catalog, 
                     is_encrypted=args.encrypt, 
-                    resiliency=args.resiliency
+                    resiliency=args.resiliency,
+                    name=os.path.basename(filepath)
                 )
                 print(f"Uploaded {relative_path}: {result}")
         else:
@@ -90,6 +98,11 @@ def main():
                 f.write(data)
         else:
             print(data.decode(errors='replace'))
+
+    elif args.command == 'get_catalog':
+        print("Retrieving objects from catalog:", args.catalog)
+        print(args)
+        result = client.get_files_in_catalog(args.catalog, output_dir=args.output)
 
     elif args.command == 'exists':
         exists = client.exists(args.key)
