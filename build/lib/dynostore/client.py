@@ -110,24 +110,25 @@ class Client(object):
 
         return response.json()["metadata"]
 
-    def _retry_request(get, url, retries=3, retry_codes=(404,), expected_code=200):
+    def _retry_request(get, url, retries=3, retry_codes=(404,), expected_code=200, stream=False):
         for i in range(retries):
             try:
-                response = get(url, timeout=10)
+                response = get(url, stream=stream, timeout=10)
                 if response.status_code == expected_code:
                     return response
                 elif response.status_code in retry_codes and i < retries - 1:
-                    print(f"Retrying {i + 1}/{retries} for URL: {url}")
+                    print(f"[Retry {i + 1}/{retries}] Retrying on status {response.status_code}: {url}")
                     time.sleep(2 ** i)
                 else:
                     response.raise_for_status()
             except requests.exceptions.RequestException as e:
                 if i < retries - 1:
-                    print(f"Request failed, retrying {i + 1}/{retries} for URL: {url}")
+                    print(f"[Retry {i + 1}/{retries}] Exception: {e}. Retrying {url}")
                     time.sleep(2 ** i)
                 else:
                     raise e
-        raise RuntimeError(f"Failed to get a valid response after {retries} retries for URL: {url}")
+        raise RuntimeError(f"Failed to get a valid response after {retries} retries: {url}")
+
 
     def get_files_in_catalog(self, catalog: str, output_dir: str = None, session: requests.Session = None, retries: int = 3) -> list:
         get = requests.get if session is None else session.get
