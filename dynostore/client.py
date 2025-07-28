@@ -110,7 +110,7 @@ class Client(object):
 
         return response.json()["metadata"]
 
-    def _retry_request(get, url, retries=3, retry_codes=(404,), expected_code=200, stream=False):
+    def _retry_request(get, url, retries=5, retry_codes=(404,), expected_code=200, stream=False):
         for i in range(retries):
             try:
                 response = get(url, stream=stream, timeout=10)
