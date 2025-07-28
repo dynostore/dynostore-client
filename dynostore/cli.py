@@ -61,7 +61,7 @@ def main():
                 print(f"Error: {args.file} is not a directory.")
                 return 1
             # Just upload all files in the directory
-            dir_path = Path("/path/to/directory")
+            dir_path = Path(args.file)
             file_paths = [str(f) for f in dir_path.iterdir() if f.is_file()]
 
             
