@@ -38,7 +38,8 @@ class Client(object):
         
         
         retransmit = True
-        while retransmit:
+        max_retries = 3
+        while retransmit and max_retries > 0:
             response = Client._retry_request(method, url, retries=retries, retry_codes=(404,), expected_code=200, stream=True)
             data = bytearray()
             for chunk in response.iter_content(chunk_size=None):
@@ -51,9 +52,12 @@ class Client(object):
         
             if data is None:
                 print(f"Decompression failed for key {key}, retrying...")
+                max_retries -= 1
                 retransmit = True
             else:
                 retransmit = False
+        if retransmit:
+            return None
         return bytes(data)
 
     def get_metadata(self, key: str, session: requests.Session = None, retries: int = 5) -> dict:
@@ -80,8 +84,9 @@ class Client(object):
             metadata = self.get_metadata(key, session=session)
             data = self.get(key, session=session)
             output_path = os.path.join(output_dir, metadata["name"])
-            with open(output_path, "wb") as file_out:
-                file_out.write(data)
+            if data is not None:
+                with open(output_path, "wb") as file_out:
+                    file_out.write(data)
 
     def put(self,
             data: bytes,
