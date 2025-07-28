@@ -68,7 +68,7 @@ class Client(object):
         get_method = requests.get if session is None else session.get
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
 
-        response = _retry_request(
+        response = Client._retry_request(
             get_method,
             url,
             retries=retries,
@@ -110,49 +110,49 @@ class Client(object):
 
         return response.json()["metadata"]
 
-def _retry_request(get, url, retries=3, retry_codes=(404,), expected_code=200):
-    for i in range(retries):
-        try:
-            response = get(url, timeout=10)
-            if response.status_code == expected_code:
-                return response
-            elif response.status_code in retry_codes and i < retries - 1:
-                print(f"Retrying {i + 1}/{retries} for URL: {url}")
-                time.sleep(2 ** i)
-            else:
-                response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            if i < retries - 1:
-                print(f"Request failed, retrying {i + 1}/{retries} for URL: {url}")
-                time.sleep(2 ** i)
-            else:
-                raise e
-    raise RuntimeError(f"Failed to get a valid response after {retries} retries for URL: {url}")
+    def _retry_request(get, url, retries=3, retry_codes=(404,), expected_code=200):
+        for i in range(retries):
+            try:
+                response = get(url, timeout=10)
+                if response.status_code == expected_code:
+                    return response
+                elif response.status_code in retry_codes and i < retries - 1:
+                    print(f"Retrying {i + 1}/{retries} for URL: {url}")
+                    time.sleep(2 ** i)
+                else:
+                    response.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                if i < retries - 1:
+                    print(f"Request failed, retrying {i + 1}/{retries} for URL: {url}")
+                    time.sleep(2 ** i)
+                else:
+                    raise e
+        raise RuntimeError(f"Failed to get a valid response after {retries} retries for URL: {url}")
 
-def get_files_in_catalog(self, catalog: str, output_dir: str = None, session: requests.Session = None, retries: int = 3) -> list:
-    get = requests.get if session is None else session.get
+    def get_files_in_catalog(self, catalog: str, output_dir: str = None, session: requests.Session = None, retries: int = 3) -> list:
+        get = requests.get if session is None else session.get
 
-    # Step 1: Get catalog metadata
-    catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
-    response = _retry_request(get, catalog_url, retries=retries)
-    catalog_info = response.json()["data"]
-    catalog_key = catalog_info["tokencatalog"]
+        # Step 1: Get catalog metadata
+        catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
+        response = Client._retry_request(get, catalog_url, retries=retries)
+        catalog_info = response.json()["data"]
+        catalog_key = catalog_info["tokencatalog"]
 
-    # Step 2: Get file list
-    list_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog_key}/list'
-    response = _retry_request(get, list_url, retries=retries, expected_code=201)
-    files = response.json()["data"]
+        # Step 2: Get file list
+        list_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog_key}/list'
+        response = Client._retry_request(get, list_url, retries=retries, expected_code=201)
+        files = response.json()["data"]
 
-    # Step 3: Download files
-    os.makedirs(output_dir, exist_ok=True)
-    for f in files:
-        print("Getting file:", f["token_file"])
-        key = f["token_file"]
-        metadata = self.get_metadata(key, session=session)
-        data = self.get(key, session=session)
-        output_path = os.path.join(output_dir, metadata["name"])
-        with open(output_path, "wb") as file_out:
-            file_out.write(data)
+        # Step 3: Download files
+        os.makedirs(output_dir, exist_ok=True)
+        for f in files:
+            print("Getting file:", f["token_file"])
+            key = f["token_file"]
+            metadata = self.get_metadata(key, session=session)
+            data = self.get(key, session=session)
+            output_path = os.path.join(output_dir, metadata["name"])
+            with open(output_path, "wb") as file_out:
+                file_out.write(data)
 
     def put(
         self,
