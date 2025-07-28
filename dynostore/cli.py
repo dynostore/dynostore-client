@@ -3,6 +3,8 @@
 import argparse
 import os
 from dynostore.client import Client
+from pathlib import Path
+
 
 
 def main():
@@ -58,17 +60,12 @@ def main():
             if not os.path.isdir(args.file):
                 print(f"Error: {args.file} is not a directory.")
                 return 1
-            # Recursively upload all files in the directory
-            files = []
-            for root, _, filenames in os.walk(args.file):
-                for filename in filenames:
-                    filepath = os.path.join(root, filename)
-                    if not os.path.isfile(filepath):
-                        continue
-                    relative_path = os.path.relpath(filepath, args.file)
-                    files.append((relative_path, filepath))
+            # Just upload all files in the directory
+            dir_path = Path("/path/to/directory")
+            file_paths = [str(f) for f in dir_path.iterdir() if f.is_file()]
+
             
-            for relative_path, filepath in files:
+            for filepath in file_paths:
                 print(f"Uploading {filepath}...")
                 with open(filepath, 'rb') as f:
                     data = f.read()
@@ -79,7 +76,7 @@ def main():
                     resiliency=args.resiliency,
                     name=os.path.basename(filepath)
                 )
-                print(f"Uploaded {relative_path}: {result}")
+                print(f"Uploaded {filepath}: {result}")
         else:
             with open(args.file, 'rb') as f:
                 data = f.read()
