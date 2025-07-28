@@ -121,7 +121,7 @@ class Client(object):
     def _retry_request(method, url, retries=5, retry_codes=(404,), expected_code=200, stream=False, **kwargs):
         for i in range(retries):
             try:
-                response = method(url, stream=stream, timeout=10, **kwargs)
+                response = method(url, stream=stream, **kwargs)
                 if response.status_code == expected_code:
                     return response
                 elif response.status_code in retry_codes and i < retries - 1:
