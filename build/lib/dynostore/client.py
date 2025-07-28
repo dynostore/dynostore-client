@@ -20,19 +20,19 @@ class Client(object):
         authenticator.authenticate()
         self.token_data = authenticator.token_data
 
-    def evict(self, key: str, session: requests.Session = None, retries: int = 3) -> None:
+    def evict(self, key: str, session: requests.Session = None, retries: int = 5) -> None:
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
         method = (session or requests).delete
         response = Client._retry_request(method, url, retries=retries, expected_code=200)
         return
 
-    def exists(self, key: str, session: requests.Session = None, retries: int = 3) -> bool:
+    def exists(self, key: str, session: requests.Session = None, retries: int = 5) -> bool:
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}/exists'
         method = (session or requests).get
         response = Client._retry_request(method, url, retries=retries, expected_code=200)
         return response.json()["exists"]
 
-    def get(self, key: str, session: requests.Session = None, retries: int = 3) -> bytes:
+    def get(self, key: str, session: requests.Session = None, retries: int = 5) -> bytes:
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
         method = (session or requests).get
         response = Client._retry_request(method, url, retries=retries, retry_codes=(404,), expected_code=200, stream=True)
@@ -47,13 +47,13 @@ class Client(object):
         data = self.object_compressor.decompress(data)
         return bytes(data)
 
-    def get_metadata(self, key: str, session: requests.Session = None, retries: int = 3) -> dict:
+    def get_metadata(self, key: str, session: requests.Session = None, retries: int = 5) -> dict:
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}/exists'
         method = (session or requests).get
         response = Client._retry_request(method, url, retries=retries, expected_code=200)
         return response.json()["metadata"]
 
-    def get_files_in_catalog(self, catalog: str, output_dir: str = None, session: requests.Session = None, retries: int = 3) -> list:
+    def get_files_in_catalog(self, catalog: str, output_dir: str = None, session: requests.Session = None, retries: int = 5) -> list:
         method = (session or requests).get
         catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
         response = Client._retry_request(method, catalog_url, retries=retries)
@@ -83,7 +83,7 @@ class Client(object):
             is_encrypted: bool = False,
             resiliency: int = 1,
             nodes=None,
-            retries: int = 3):
+            retries: int = 5):
 
         start_time = time.perf_counter_ns()
         data_hash = hashlib.sha3_256(data).hexdigest()

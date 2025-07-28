@@ -35,16 +35,25 @@ class Client(object):
     def get(self, key: str, session: requests.Session = None, retries: int = 5) -> bytes:
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
         method = (session or requests).get
-        response = Client._retry_request(method, url, retries=retries, retry_codes=(404,), expected_code=200, stream=True)
+        
+        
+        retransmit = True
+        while retransmit:
+            response = Client._retry_request(method, url, retries=retries, retry_codes=(404,), expected_code=200, stream=True)
+            data = bytearray()
+            for chunk in response.iter_content(chunk_size=None):
+                data += chunk
 
-        data = bytearray()
-        for chunk in response.iter_content(chunk_size=None):
-            data += chunk
+            if response.headers.get('is_encrypted', '0') == '1':
+                data = self.object_encrypter.decrypt(data)
 
-        if response.headers.get('is_encrypted', '0') == '1':
-            data = self.object_encrypter.decrypt(data)
-
-        data = self.object_compressor.decompress(data)
+            data = self.object_compressor.decompress(data)
+        
+            if data is None:
+                print(f"Decompression failed for key {key}, retrying...")
+                retransmit = True
+            else:
+                retransmit = False
         return bytes(data)
 
     def get_metadata(self, key: str, session: requests.Session = None, retries: int = 5) -> dict:

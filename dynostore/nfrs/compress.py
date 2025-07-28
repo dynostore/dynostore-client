@@ -13,6 +13,9 @@ class ObjectCompressor:
 
     def decompress(self, compressed_data: bytes):
         """Decompress a byte string back to a Python object."""
-        decompressed_data = zlib.decompress(compressed_data)
-        obj = pickle.loads(decompressed_data)
-        return obj
+        try:
+            decompressed_data = zlib.decompress(compressed_data)
+            obj = pickle.loads(decompressed_data)
+            return obj
+        except (pickle.UnpicklingError, zlib.error) as e:
+            return None  # Return None if decompression fails
