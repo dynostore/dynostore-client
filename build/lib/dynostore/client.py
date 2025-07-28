@@ -9,6 +9,7 @@ from dynostore.nfrs.compress import ObjectCompressor
 from dynostore.nfrs.cipher import SecureObjectStore
 from dynostore.auth.authenticate import DeviceAuthenticator
 
+
 class Client(object):
 
     def __init__(self, metadata_server):
@@ -21,7 +22,6 @@ class Client(object):
         authenticator.authenticate()
         self.token_data = authenticator.token_data
         print(self.token_data, flush=True)
-       
 
     def evict(
         self,
@@ -62,36 +62,35 @@ class Client(object):
     def get(
         self,
         key: str,
-        session: requests.Session = None
+        session: requests.Session = None,
+        retries: int = 3
     ) -> bytes:
-        get = requests.get if session is None else session.get
-        # print(key, type(key), sep=" - ")
-        response = get(
-            f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
+        get_method = requests.get if session is None else session.get
+        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
+
+        response = _retry_request(
+            get_method,
+            url,
+            retries=retries,
+            retry_codes=(404,),
+            expected_code=200,
+            stream=True
         )
 
-        if response.status_code == 404:
-            raise requests.exceptions.RequestException(
-                f'DynoStore returned HTTP error code {response.status_code}. '
-                f'{response.text}',
-                response=response,
-            )
+        # Read content in chunks
+        data = bytearray()
+        for chunk in response.iter_content(chunk_size=None):
+            data += chunk
 
-        if response.status_code == 200:
+        # Decrypt if needed
+        if response.headers.get('is_encrypted', '0') == '1':
+            data = self.object_encrypter.decrypt(data)
 
-            data = bytearray()
-            for chunk in response.iter_content(chunk_size=None):
-                data += chunk
-            
-            # Decrypt the data if it was encrypted
-            if response.headers.get('is_encrypted', '0') == '1':
-                data = self.object_encrypter.decrypt(data)
+        # Uncompress
+        data = self.object_compressor.decompress(data)
 
-            # Uncompress the data
-            data = self.object_compressor.decompress(data)
+        return bytes(data)
 
-            return bytes(data)
-        
     def get_metadata(
         self,
         key: str,
@@ -110,76 +109,50 @@ class Client(object):
             )
 
         return response.json()["metadata"]
-        
-    def get_files_in_catalog(
-            self,
-            catalog: str,
-            output_dir: str = None,
-            session: requests.Session = None,
-            retries: int = 3
-    ) -> list:
-        # First get the medata of the catalog
-        get = requests.get if session is None else session.get
 
-        for i in range(retries):
-            try:
-                response = get(
-                    f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
-                )
+def _retry_request(get, url, retries=3, retry_codes=(404,), expected_code=200):
+    for i in range(retries):
+        try:
+            response = get(url, timeout=10)
+            if response.status_code == expected_code:
+                return response
+            elif response.status_code in retry_codes and i < retries - 1:
+                print(f"Retrying {i + 1}/{retries} for URL: {url}")
+                time.sleep(2 ** i)
+            else:
+                response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            if i < retries - 1:
+                print(f"Request failed, retrying {i + 1}/{retries} for URL: {url}")
+                time.sleep(2 ** i)
+            else:
+                raise e
+    raise RuntimeError(f"Failed to get a valid response after {retries} retries for URL: {url}")
 
-                if response.status_code == 404: # Retry
-                    if i < retries - 1:
-                        print(f"Retrying {i + 1}/{retries}...")
-                        time.sleep(2 ** i)
-                elif response.status_code == 200:
-                    break
-                    # raise requests.exceptions.RequestException(
-                    #     f'DynoStore returned HTTP error code {response.status_code}. '
-                    #     f'{response.text}',
-                    #     response=response,
-                    # )
-                
-            except requests.exceptions.RequestException as e:
-                if i < retries - 1:
-                    print(f"Retrying {i + 1}/{retries}...")
-                    time.sleep(2 ** i)
-                else:
-                    raise e
+def get_files_in_catalog(self, catalog: str, output_dir: str = None, session: requests.Session = None, retries: int = 3) -> list:
+    get = requests.get if session is None else session.get
 
-    
-        catalog_info = response.json()["data"]
-        catalog_key = catalog_info["tokencatalog"]
-        
-        # Now get the files in the catalog
-        response = get(
-            f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog_key}/list'
-        )
+    # Step 1: Get catalog metadata
+    catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
+    response = _retry_request(get, catalog_url, retries=retries)
+    catalog_info = response.json()["data"]
+    catalog_key = catalog_info["tokencatalog"]
 
-        if response.status_code == 404:
-            raise requests.exceptions.RequestException(
-                f'DynoStore returned HTTP error code {response.status_code}. '
-                f'{response.text}',
-                response=response,
-            )
-        if response.status_code == 201:
-            files = response.json()["data"]
+    # Step 2: Get file list
+    list_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog_key}/list'
+    response = _retry_request(get, list_url, retries=retries, expected_code=201)
+    files = response.json()["data"]
 
-            os.makedirs(output_dir, exist_ok=True) 
-            
-            # Now iterate over the files and download them
-            for f in files:
-                print("Getting file:", f["token_file"])
-                key = f["token_file"]
-                # Get the metadata of the file
-                metadata = self.get_metadata(key, session=session)
-
-                # Get the data of the file
-                data = self.get(key, session=session)
-
-                # Write the data to the output dir
-                output_path = os.path.join(output_dir, metadata["name"])
-                with open(output_path, "wb") as f:
-                    f.write(data)
+    # Step 3: Download files
+    os.makedirs(output_dir, exist_ok=True)
+    for f in files:
+        print("Getting file:", f["token_file"])
+        key = f["token_file"]
+        metadata = self.get_metadata(key, session=session)
+        data = self.get(key, session=session)
+        output_path = os.path.join(output_dir, metadata["name"])
+        with open(output_path, "wb") as file_out:
+            file_out.write(data)
 
     def put(
         self,
@@ -199,7 +172,8 @@ class Client(object):
 
         put = requests.put if session is None else session.put
         data_compressed = self.object_compressor.compress(data)
-        data_encrypted = self.object_encrypter.encrypt(data_compressed) if is_encrypted else data_compressed
+        data_encrypted = self.object_encrypter.encrypt(
+            data_compressed) if is_encrypted else data_compressed
         print(key)
         fake_file = io.BytesIO(data_encrypted)
 
@@ -223,11 +197,9 @@ class Client(object):
             )
         end = time.perf_counter_ns()
         return {
-            "total_time": (end - start_time) / 1e6, 
-            "metadata_time": res["total_time"] / 1e6, 
+            "total_time": (end - start_time) / 1e6,
+            "metadata_time": res["total_time"] / 1e6,
             "upload_time": res["time_upload"] / 1e6,
             "key_object": res["key_object"]
-            
-        }
 
-    
+        }
