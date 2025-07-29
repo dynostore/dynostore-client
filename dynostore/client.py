@@ -77,10 +77,14 @@ class Client(object):
         response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
         files = response.json()["data"]
         print("FILES IN CATALOG", response.text, flush=True)
-        while not files:
+
+        i = 0
+        while not files and i < 10:
+            print("No files found, retrying...", flush=True)
             response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
             files = response.json()["data"]
             print("FILES IN CATALOG", response.text, flush=True)
+            i += 1
         print("FILES ", files, flush=True)
 
         os.makedirs(output_dir, exist_ok=True)
