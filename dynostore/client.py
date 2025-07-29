@@ -135,15 +135,17 @@ class Client(object):
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{catalog}/{key}'
         method = (session or requests).put
         response = Client._retry_request(method, url, retries=retries, expected_code=201, files=files)
-
-        res = response.json()
-        end = time.perf_counter_ns()
-        return {
-            "total_time": (end - start_time) / 1e6,
-            "metadata_time": res["total_time"] / 1e6,
-            "upload_time": res["time_upload"] / 1e6,
-            "key_object": res["key_object"]
-        }
+        
+        if not response:
+            res = response.json()
+            end = time.perf_counter_ns()
+            return {
+                "total_time": (end - start_time) / 1e6,
+                "metadata_time": res["total_time"] / 1e6,
+                "upload_time": res["time_upload"] / 1e6,
+                "key_object": res["key_object"]
+            }
+        
 
     @staticmethod
     def _retry_request(method, url, retries=5, retry_codes=(404,), expected_code=200, stream=False, **kwargs):
@@ -164,4 +166,5 @@ class Client(object):
                     time.sleep(2 ** i)
                 else:
                     print("ERROR",response.text)
-        raise RuntimeError(f"Failed to get a valid response after {retries} retries: {url}")
+        #raise RuntimeError(f"Failed to get a valid response after {retries} retries: {url}")
+        return False  # Return False if all retries fail

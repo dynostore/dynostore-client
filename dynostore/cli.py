@@ -90,11 +90,12 @@ def main():
 
     elif args.command == 'get':
         data = client.get(args.key)
-        if args.output:
-            with open(args.output, 'wb') as f:
-                f.write(data)
-        else:
-            print(data.decode(errors='replace'))
+        if data is not None:
+            if args.output:
+                with open(args.output, 'wb') as f:
+                    f.write(data)
+            else:
+                print(data.decode(errors='replace'))
 
     elif args.command == 'get_catalog':
         print("Retrieving objects from catalog:", args.catalog)
