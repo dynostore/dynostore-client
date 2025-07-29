@@ -91,6 +91,7 @@ class Client(object):
                     with open(output_path, "wb") as file_out:
                         file_out.write(data)
         except Exception as e:
+            print("AAAAAAAAA")
             print("EXCEPTION",e, flush=True)
 
     def put(self,
