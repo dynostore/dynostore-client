@@ -70,6 +70,11 @@ class Client(object):
         method = (session or requests).get
         catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
         response = Client._retry_request(method, catalog_url, retries=retries)
+
+        if not response or response.status_code != 200:
+            print("ERROR", response.text)
+            return []
+
         catalog_info = response.json()["data"]
         catalog_key = catalog_info["tokencatalog"]
 
