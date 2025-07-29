@@ -77,18 +77,21 @@ class Client(object):
         response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
         files = response.json()["data"]
 
-        print("FILES ", files)
+        print("FILES ", files, flush=True)
 
         os.makedirs(output_dir, exist_ok=True)
-        for f in files:
-            print("Getting file:", f["token_file"])
-            key = f["token_file"]
-            metadata = self.get_metadata(key, session=session)
-            data = self.get(key, session=session)
-            output_path = os.path.join(output_dir, metadata["name"])
-            if data is not None:
-                with open(output_path, "wb") as file_out:
-                    file_out.write(data)
+        try:
+            for f in files:
+                print("Getting file:", f["token_file"])
+                key = f["token_file"]
+                metadata = self.get_metadata(key, session=session)
+                data = self.get(key, session=session)
+                output_path = os.path.join(output_dir, metadata["name"])
+                if data is not None:
+                    with open(output_path, "wb") as file_out:
+                        file_out.write(data)
+        except Exception as e:
+            print(e, flush=True)
 
     def put(self,
             data: bytes,
