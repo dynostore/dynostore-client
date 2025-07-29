@@ -72,7 +72,7 @@ class Client(object):
         response = Client._retry_request(method, catalog_url, retries=retries)
 
         if not response or response.status_code != 200:
-            print("ERROR", response.text)
+            print("ERROR", response)
             return []
 
         catalog_info = response.json()["data"]
