@@ -163,5 +163,5 @@ class Client(object):
                     print(f"[Retry {i + 1}/{retries}] Exception: {e}. Retrying {url}")
                     time.sleep(2 ** i)
                 else:
-                    raise e
+                    print("ERROR",response.text)
         raise RuntimeError(f"Failed to get a valid response after {retries} retries: {url}")
