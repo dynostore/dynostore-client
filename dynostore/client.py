@@ -76,7 +76,7 @@ class Client(object):
         list_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog_key}/list'
         response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
         files = response.json()["data"]
-
+        print("FILES IN CATALOG", response.text, flush=True)
         print("FILES ", files, flush=True)
 
         os.makedirs(output_dir, exist_ok=True)
