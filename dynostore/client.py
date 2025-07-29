@@ -77,6 +77,8 @@ class Client(object):
         response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
         files = response.json()["data"]
 
+        print("FILES ", files)
+
         os.makedirs(output_dir, exist_ok=True)
         for f in files:
             print("Getting file:", f["token_file"])
@@ -138,7 +140,7 @@ class Client(object):
                 response = method(url, stream=stream, **kwargs)
                 if response.status_code == expected_code:
                     return response
-                elif i < retries - 1:
+                elif response.status_code in retry_codes and i < retries - 1:
                     print(f"[Retry {i + 1}/{retries}] Retrying on: {url}")
                     time.sleep(2 ** i)
                 else:
