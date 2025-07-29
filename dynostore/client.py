@@ -138,8 +138,8 @@ class Client(object):
                 response = method(url, stream=stream, **kwargs)
                 if response.status_code == expected_code:
                     return response
-                elif response.status_code in retry_codes and i < retries - 1:
-                    print(f"[Retry {i + 1}/{retries}] Retrying on status {response.status_code}: {url}")
+                elif i < retries - 1:
+                    print(f"[Retry {i + 1}/{retries}] Retrying on: {url}")
                     time.sleep(2 ** i)
                 else:
                     response.raise_for_status()
