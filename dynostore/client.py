@@ -152,7 +152,8 @@ class Client(object):
                     print(f"[Retry {i + 1}/{retries}] Retrying on: {url}")
                     time.sleep(2 ** i)
                 else:
-                    response.raise_for_status()
+                    #response.raise_for_status()
+                    print("ERROR",response.text)
             except requests.exceptions.RequestException as e:
                 if i < retries - 1:
                     print(f"[Retry {i + 1}/{retries}] Exception: {e}. Retrying {url}")
