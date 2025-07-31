@@ -140,16 +140,18 @@ class Client(object):
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{catalog}/{key}'
         method = (session or requests).put
         response = Client._retry_request(method, url, retries=retries, expected_code=201, files=files)
-        
+        print(response)
         if not response:
-            res = response.json()
-            end = time.perf_counter_ns()
-            return {
-                "total_time": (end - start_time) / 1e6,
-                "metadata_time": res["total_time"] / 1e6,
-                "upload_time": res["time_upload"] / 1e6,
-                "key_object": res["key_object"]
-            }
+            print("ERROR", response)
+            return None
+        res = response.json()
+        end = time.perf_counter_ns()
+        return {
+            "total_time": (end - start_time) / 1e6,
+            "metadata_time": res["total_time"] / 1e6,
+            "upload_time": res["time_upload"] / 1e6,
+            "key_object": res["key_object"]
+        }
         
 
     @staticmethod

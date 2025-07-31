@@ -70,6 +70,11 @@ class Client(object):
         method = (session or requests).get
         catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
         response = Client._retry_request(method, catalog_url, retries=retries)
+
+        if not response or response.status_code != 200:
+            print("ERROR", response)
+            return []
+
         catalog_info = response.json()["data"]
         catalog_key = catalog_info["tokencatalog"]
 
@@ -77,6 +82,14 @@ class Client(object):
         response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
         files = response.json()["data"]
         print("FILES IN CATALOG", response.text, flush=True)
+
+        i = 0
+        while not files and i < 10:
+            print("No files found, retrying...", flush=True)
+            response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
+            files = response.json()["data"]
+            print("FILES IN CATALOG", response.text, flush=True)
+            i += 1
         print("FILES ", files, flush=True)
 
         os.makedirs(output_dir, exist_ok=True)
@@ -127,7 +140,10 @@ class Client(object):
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{catalog}/{key}'
         method = (session or requests).put
         response = Client._retry_request(method, url, retries=retries, expected_code=201, files=files)
-
+        print(response)
+        if not response:
+            print("ERROR", response)
+            return None
         res = response.json()
         end = time.perf_counter_ns()
         return {
@@ -136,6 +152,7 @@ class Client(object):
             "upload_time": res["time_upload"] / 1e6,
             "key_object": res["key_object"]
         }
+        
 
     @staticmethod
     def _retry_request(method, url, retries=5, retry_codes=(404,), expected_code=200, stream=False, **kwargs):
@@ -148,11 +165,13 @@ class Client(object):
                     print(f"[Retry {i + 1}/{retries}] Retrying on: {url}")
                     time.sleep(2 ** i)
                 else:
-                    response.raise_for_status()
+                    #response.raise_for_status()
+                    print("ERROR",response.text)
             except requests.exceptions.RequestException as e:
                 if i < retries - 1:
                     print(f"[Retry {i + 1}/{retries}] Exception: {e}. Retrying {url}")
                     time.sleep(2 ** i)
                 else:
-                    raise e
-        raise RuntimeError(f"Failed to get a valid response after {retries} retries: {url}")
+                    print("ERROR",response.text)
+        #raise RuntimeError(f"Failed to get a valid response after {retries} retries: {url}")
+        return False  # Return False if all retries fail
