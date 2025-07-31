@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dynostore"
-version = "0.0.39"
+version = "0.0.391"
 authors = [
     { name = "Dante D. Sanchez-Gallegos", email = "dantsanc@pa.uc3m.es" },
 ]

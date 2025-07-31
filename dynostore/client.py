@@ -139,7 +139,7 @@ class Client(object):
 
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{catalog}/{key}'
         method = (session or requests).put
-        response = Client._retry_request(method, url, retries=retries, expected_code=201, files=files, timeout=10)
+        response = Client._retry_request(method, url, retries=retries, expected_code=201, files=files)
         print(response)
         if not response:
             print("ERROR", response)
