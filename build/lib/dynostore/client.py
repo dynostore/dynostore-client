@@ -8,6 +8,8 @@ import json
 from dynostore.nfrs.compress import ObjectCompressor
 from dynostore.nfrs.cipher import SecureObjectStore
 from dynostore.auth.authenticate import DeviceAuthenticator
+from dynostore.utils.data import chunk_bytes
+from dynostore.constants import MAX_CHUNK_LENGTH
 
 
 class Client(object):
@@ -110,7 +112,7 @@ class Client(object):
     def put(self,
             data: bytes,
             catalog: str,
-            key: str = str(uuid.uuid4()),
+            key: str = None,
             name: str = None,
             session: requests.Session = None,
             is_encrypted: bool = False,
@@ -119,39 +121,62 @@ class Client(object):
             retries: int = 5):
 
         start_time = time.perf_counter_ns()
+        session = session or requests.Session()
+
+        # --- Metadata prep ---
+        key = str(uuid.uuid4()) if key is None else key
         data_hash = hashlib.sha3_256(data).hexdigest()
         name = data_hash if name is None else name
-        key = str(uuid.uuid4())
 
         data_compressed = self.object_compressor.compress(data)
         data_encrypted = self.object_encrypter.encrypt(data_compressed) if is_encrypted else data_compressed
-        fake_file = io.BytesIO(data_encrypted)
-
         payload = {
-            "name": name, "size": len(data_compressed), "hash": data_hash, "key": key,
-            "is_encrypted": int(is_encrypted), "resiliency": resiliency, "nodes": nodes
+            "name": name,
+            "size": len(data_compressed),
+            "hash": data_hash,
+            "key": key,
+            "is_encrypted": int(is_encrypted),
+            "resiliency": resiliency,
+            "nodes": nodes or [],
         }
 
-        files = [
-            ('json', ('payload.json', json.dumps(payload), 'application/json')),
-            ('data', ('data.bin', fake_file, 'application/octet-stream'))
-        ]
-
-        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{catalog}/{key}'
-        method = (session or requests).put
-        response = Client._retry_request(method, url, retries=retries, expected_code=201, files=files)
-        print(response)
-        if not response:
-            print("ERROR", response)
+        # --- Step 1: Send metadata ---
+        metadata_url = f'http://{self.metadata_server}/metadata/{self.token_data["user_token"]}/{key}'
+        try:
+            metadata_resp = Client._retry_request(session.post, metadata_url,
+                                                retries=retries, expected_code=200,
+                                                json=payload)
+            if not metadata_resp:
+                print("ERROR sending metadata")
+                return None
+        except Exception as e:
+            print(f"Metadata upload failed: {e}")
             return None
-        res = response.json()
+
+        # --- Step 2: Stream file content ---
+        upload_url = f'http://{self.metadata_server}/upload/{self.token_data["user_token"]}/{catalog}/{key}'
+        try:
+            upload_resp = Client._retry_request(session.put, upload_url,
+                                                retries=retries, expected_code=201,
+                                                data=chunk_bytes(data_encrypted, MAX_CHUNK_LENGTH),
+                                                stream=True,
+                                                headers={"Content-Type": "application/octet-stream"})
+            if not upload_resp:
+                print("ERROR uploading data")
+                return None
+        except Exception as e:
+            print(f"Data upload failed: {e}")
+            return None
+
         end = time.perf_counter_ns()
+        print(upload_resp.json())
         return {
             "total_time": (end - start_time) / 1e6,
-            "metadata_time": res["total_time"] / 1e6,
-            "upload_time": res["time_upload"] / 1e6,
-            "key_object": res["key_object"]
+            "metadata_time": metadata_resp.json().get("total_time", 0) / 1e6,
+            "upload_time": upload_resp.json().get("time_upload", 0) / 1e6,
+            "key_object": key
         }
+
         
 
     @staticmethod

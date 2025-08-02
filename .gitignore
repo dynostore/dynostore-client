@@ -4,6 +4,7 @@ dynostore.egg-info/*
 build/*
 testdata/*
 
-testcat/*
+testcat/*W
 dynostore.egg-info/top_level.txt
 a
+1MB
