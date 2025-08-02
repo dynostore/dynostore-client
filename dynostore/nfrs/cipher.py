@@ -46,6 +46,7 @@ class SecureObjectStore:
         """Decrypt the AES-256-GCM encrypted object."""
         iv = encrypted_data[:12]
         ciphertext = encrypted_data[12:]
+        print(iv, ciphertext)
         aesgcm = AESGCM(self.key)
         decrypted = aesgcm.decrypt(iv, ciphertext, None)
         return pickle.loads(decrypted)

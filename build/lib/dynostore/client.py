@@ -46,8 +46,9 @@ class Client(object):
             data = bytearray()
             for chunk in response.iter_content(chunk_size=None):
                 data += chunk
-
+            
             if response.headers.get('is_encrypted', '0') == '1':
+                print("Data is encrypted, decrypting...")
                 data = self.object_encrypter.decrypt(data)
 
             data = self.object_compressor.decompress(data)
