@@ -47,6 +47,8 @@ class Client(object):
             for chunk in response.iter_content(chunk_size=None):
                 data += chunk
             
+            print(hashlib.sha3_256(data).hexdigest())
+            
             if response.headers.get('is_encrypted', '0') == '1':
                 print("Data is encrypted, decrypting...")
                 data = self.object_encrypter.decrypt(data)
@@ -131,9 +133,11 @@ class Client(object):
 
         data_compressed = self.object_compressor.compress(data)
         data_encrypted = self.object_encrypter.encrypt(data_compressed) if is_encrypted else data_compressed
+        print(len(data_encrypted), flush=True)
+        print(hashlib.sha3_256(data_encrypted).hexdigest())
         payload = {
             "name": name,
-            "size": len(data_compressed),
+            "size": len(data_encrypted),
             "hash": data_hash,
             "key": key,
             "is_encrypted": int(is_encrypted),

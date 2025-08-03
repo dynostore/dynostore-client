@@ -35,6 +35,9 @@ class SecureObjectStore:
 
     def decrypt(self, encrypted_data: bytes):
         """Decrypt the AES-256-GCM encrypted object by extracting salt and IV from payload."""
+        print(f"[DEBUG] Type of encrypted_data: {type(encrypted_data)}")
+        print(len(encrypted_data))
+        encrypted_data = bytes(encrypted_data)
         salt = encrypted_data[:16]
         iv = encrypted_data[16:28]
         ciphertext = encrypted_data[28:]
@@ -42,3 +45,21 @@ class SecureObjectStore:
         aesgcm = AESGCM(key)
         decrypted = aesgcm.decrypt(iv, ciphertext, None)
         return pickle.loads(decrypted)
+
+
+if __name__ == "__main__":
+    # Example usage
+    store = SecureObjectStore("my_secret_password")
+    
+    # Encrypt an object
+    original_data = {"key": "value", "number": 42}
+    with open("../../1MB", "rb") as f:
+        #pickle.dump(original_data, f)
+        encrypted_data = store.encrypt(f.read())
+        print("Encrypted data:", encrypted_data)
+        print("Encrypted data size:", len(encrypted_data))
+        # Decrypt the object
+        decrypted_data = store.decrypt(encrypted_data)
+        print("Decrypted data:", decrypted_data)
+        
+        assert original_data == decrypted_data, "Decryption failed!"
