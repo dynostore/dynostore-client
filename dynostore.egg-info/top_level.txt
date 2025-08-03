@@ -1,7 +1,6 @@
 build
 dist
 dynostore
-testcat
 testdata
 tests
 venv
