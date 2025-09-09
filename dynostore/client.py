@@ -12,6 +12,14 @@ from dynostore.utils.data import chunk_bytes
 from dynostore.constants import MAX_CHUNK_LENGTH
 
 
+logger = logging.getLogger(__name__)
+
+
+def _log(operation: str, key: str, phase: str, status: str, msg: str = ""):
+    # Format: SERVICE, OPERATION, OBJECTKEY, START/END, Status, MSG
+    logger.debug(f"CLIENT,{operation},{key},{phase},{status},{msg}")
+
+
 class EncryptionException(Exception):
     pass
 
@@ -27,47 +35,44 @@ class CompressException(Exception):
 class Client(object):
 
     def __init__(self, metadata_server):
-        self.logger = logging.getLogger(__name__)
-        self.logger.debug('CLIENT,INIT,START,metadata_server=%s', metadata_server)
-
         self.metadata_server = metadata_server
         self.object_compressor = ObjectCompressor()
         self.object_encrypter = SecureObjectStore("aaaa")
-
-        self.logger.debug('CLIENT,INIT,AUTH,START,auth_url=%s', self.metadata_server)
+        _log("INIT", "-", "START", "RUN", f"metadata_server={metadata_server}")
         authenticator = DeviceAuthenticator(auth_url=self.metadata_server)
         authenticator.authenticate()
         self.token_data = authenticator.token_data
-        self.logger.debug('CLIENT,INIT,AUTH,END,SUCCESS,user_token=%s', self.token_data.get("user_token", "NA"))
-        self.logger.debug('CLIENT,INIT,END,SUCCESS')
+        _log("INIT", "-", "END", "SUCCESS", f"user_token={self.token_data.get('user_token','NA')}")
 
     def evict(self, key: str, session: requests.Session = None, retries: int = 5) -> None:
-        self.logger.debug('CLIENT,EVICT,%s,START', key)
+        _log("EVICT", key, "START", "RUN", "")
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
         method = (session or requests).delete
         try:
-            response = Client._retry_request(method, url, retries=retries, expected_code=200)
+            response = Client._retry_request(method, url, retries=retries, expected_code=200,
+                                             op="EVICT_HTTP", obj_key=key)
             if response.ok:
-                self.logger.debug('CLIENT,EVICT,%s,END,SUCCESS,msg=%s', key, response.text)
+                _log("EVICT", key, "END", "SUCCESS", f"status={response.status_code}")
         except Exception as e:
-            self.logger.error('CLIENT,EVICT,%s,ERROR,%s', key, e)
+            _log("EVICT", key, "END", "ERROR", f"msg={e}")
         return
 
     def exists(self, key: str, session: requests.Session = None, retries: int = 5) -> bool:
-        self.logger.debug('CLIENT,EXISTS,%s,START', key)
+        _log("EXISTS", key, "START", "RUN", "")
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}/exists'
         method = (session or requests).get
         try:
-            response = Client._retry_request(method, url, retries=retries, expected_code=200)
-            if response.ok:
-                self.logger.debug('CLIENT,EXISTS,%s,END,SUCCESS,msg=%s', key, response.text)
-            return response.json().get("exists", False)
+            response = Client._retry_request(method, url, retries=retries, expected_code=200,
+                                             op="EXISTS_HTTP", obj_key=key)
+            ok = response.json().get("exists", False)
+            _log("EXISTS", key, "END", "SUCCESS", f"status={response.status_code};exists={ok}")
+            return ok
         except Exception as e:
-            self.logger.error('CLIENT,EXISTS,%s,ERROR,%s', key, e)
+            _log("EXISTS", key, "END", "ERROR", f"msg={e}")
             return False
 
     def get(self, key: str, session: requests.Session = None, retries: int = 5) -> bytes:
-        self.logger.debug('CLIENT,GET,%s,START', key)
+        _log("GET", key, "START", "RUN", "")
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
         method = (session or requests).get
         retransmit = True
@@ -75,139 +80,137 @@ class Client(object):
 
         while retransmit and max_retries > 0:
             try:
-                response = Client._retry_request(
-                    method, url, retries=retries, retry_codes=(404,), expected_code=200, stream=True
-                )
+                response = Client._retry_request(method, url, retries=retries, retry_codes=(404,),
+                                                 expected_code=200, stream=True, op="GET_HTTP", obj_key=key)
             except Exception as e:
-                self.logger.debug('CLIENT,GET,%s,END,ERROR,msg=%s,remaining_retries=%d', key, str(e), max_retries - 1)
                 max_retries -= 1
+                _log("GET", key, "END", "ERROR", f"phase=HTTP;remaining_retries={max_retries};msg={e}")
                 continue
 
-            self.logger.debug('CLIENT,GET,%s,RESPONSE,SUCCESS,headers_is_encrypted=%s',
-                              key, response.headers.get('is_encrypted', '0'))
-
             data = bytearray()
-            start_recv = time.perf_counter_ns()
+            t0 = time.perf_counter_ns()
             for chunk in response.iter_content(chunk_size=None):
                 data += chunk
-            recv_time_ms = (time.perf_counter_ns() - start_recv) / 1e6
-
-            self.logger.debug('CLIENT,GET,%s,RECEIVE,END,bytes=%d,time_ms=%.3f', key, len(data), recv_time_ms)
+            recv_ms = (time.perf_counter_ns() - t0) / 1e6
+            _log("GET", key, "END", "SUCCESS", f"phase=RECEIVE;bytes={len(data)};time_ms={recv_ms:.3f}")
 
             if response.headers.get('is_encrypted', '0') == '1':
                 try:
-                    self.logger.debug('CLIENT,GET,%s,DECRYPT,START', key)
+                    _log("GET", key, "START", "RUN", "phase=DECRYPT")
                     t0 = time.perf_counter_ns()
                     data = self.object_encrypter.decrypt(data)
-                    t1 = time.perf_counter_ns()
-                    self.logger.debug('CLIENT,GET,%s,DECRYPT,END,SUCCESS,time_ms=%.3f,bytes=%d',
-                                      key, (t1 - t0) / 1e6, len(data))
+                    _log("GET", key, "END", "SUCCESS",
+                         f"phase=DECRYPT;bytes={len(data)};time_ms={(time.perf_counter_ns()-t0)/1e6:.3f}")
                 except Exception as e:
-                    self.logger.debug('CLIENT,GET,%s,DECRYPT,END,ERROR,msg=%s', key, str(e))
+                    _log("GET", key, "END", "ERROR", f"phase=DECRYPT;msg={e}")
                     raise EncryptionException(f'Decryption failed: {str(e)}')
 
             try:
-                self.logger.debug('CLIENT,GET,%s,DECOMPRESS,START', key)
+                _log("GET", key, "START", "RUN", "phase=DECOMPRESS")
                 t0 = time.perf_counter_ns()
                 data = self.object_compressor.decompress(data)
-                t1 = time.perf_counter_ns()
-                self.logger.debug('CLIENT,GET,%s,DECOMPRESS,END,SUCCESS,time_ms=%.3f,bytes=%s',
-                                  key, (t1 - t0) / 1e6, 'None' if data is None else len(data))
+                out_bytes = 'None' if data is None else len(data)
+                _log("GET", key, "END", "SUCCESS",
+                     f"phase=DECOMPRESS;bytes={out_bytes};time_ms={(time.perf_counter_ns()-t0)/1e6:.3f}")
             except Exception as e:
-                self.logger.debug('CLIENT,GET,%s,DECOMPRESS,END,ERROR,msg=%s', key, str(e))
+                _log("GET", key, "END", "ERROR", f"phase=DECOMPRESS;msg={e}")
                 raise DecompressException(f'Decompression failed: {str(e)}')
 
             if data is None:
-                self.logger.debug('CLIENT,GET,%s,END,ERROR,msg=Decompression returned None,retry', key)
                 max_retries -= 1
                 retransmit = True
+                _log("GET", key, "END", "ERROR", "phase=DECOMPRESS;msg=None_bytes;retrying=1")
             else:
                 retransmit = False
 
         if retransmit:
-            self.logger.debug('CLIENT,GET,%s,END,ERROR,msg=Max retries reached, aborting', key)
+            _log("GET", key, "END", "ERROR", "msg=Max retries reached;aborting")
             return None
 
-        self.logger.debug('CLIENT,GET,%s,END,SUCCESS,FINAL_BYTES=%d', key, len(data))
+        _log("GET", key, "END", "SUCCESS", f"FINAL_BYTES={len(data)}")
         return bytes(data)
 
     def get_metadata(self, key: str, session: requests.Session = None, retries: int = 5) -> dict:
-        self.logger.debug('CLIENT,GET_METADATA,%s,START', key)
+        _log("GET_METADATA", key, "START", "RUN", "")
         url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}/exists'
         method = (session or requests).get
         try:
-            response = Client._retry_request(method, url, retries=retries, expected_code=200)
+            response = Client._retry_request(method, url, retries=retries, expected_code=200,
+                                             op="GET_METADATA_HTTP", obj_key=key)
             meta = response.json().get("metadata", {})
-            self.logger.debug('CLIENT,GET_METADATA,%s,END,SUCCESS,metadata_keys=%s', key, list(meta.keys()))
+            _log("GET_METADATA", key, "END", "SUCCESS", f"keys={list(meta.keys())}")
             return meta
         except Exception as e:
-            self.logger.error('CLIENT,GET_METADATA,%s,ERROR,%s', key, e)
+            _log("GET_METADATA", key, "END", "ERROR", f"msg={e}")
             return {}
 
     def get_files_in_catalog(self, catalog: str, output_dir: str = None,
                              session: requests.Session = None, retries: int = 5) -> list:
-        self.logger.debug('CLIENT,LIST_CATALOG,%s,START,output_dir=%s', catalog, output_dir)
+        op = "GET_CATALOG"
+        _log(op, catalog, "START", "RUN", f"output_dir={output_dir}")
         method = (session or requests).get
+
         catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
         try:
-            response = Client._retry_request(method, catalog_url, retries=retries, expected_code=200)
+            response = Client._retry_request(method, catalog_url, retries=retries, expected_code=200,
+                                             op=f"{op}_LOOKUP", obj_key=catalog)
         except Exception as e:
-            self.logger.error('CLIENT,LIST_CATALOG,%s,ERROR,lookup_failed,%s', catalog, e)
+            _log(op, catalog, "END", "ERROR", f"phase=LOOKUP;msg={e}")
             return []
 
         catalog_info = response.json().get("data", {})
         catalog_key = catalog_info.get("tokencatalog")
-        self.logger.debug('CLIENT,LIST_CATALOG,%s,TOKEN,%s', catalog, catalog_key)
 
         list_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog_key}/list'
         try:
-            response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
+            response = Client._retry_request(method, list_url, retries=retries, expected_code=201,
+                                             op=f"{op}_LIST", obj_key=catalog)
         except Exception as e:
-            self.logger.error('CLIENT,LIST_CATALOG,%s,ERROR,list_failed,%s', catalog, e)
+            _log(op, catalog, "END", "ERROR", f"phase=LIST;msg={e}")
             return []
 
+        print("Response:", response.status_code, response.text)
         files = response.json().get("data", [])
-        self.logger.debug('CLIENT,LIST_CATALOG,%s,FILES_FOUND,count=%d', catalog, len(files))
+        print(files)
+        _log(op, catalog, "END", "SUCCESS", f"phase=LIST;count={len(files)}")
 
         i = 0
         while not files and i < 10:
-            self.logger.debug('CLIENT,LIST_CATALOG,%s,FILES_EMPTY,RETRY,%d', catalog, i + 1)
             try:
-                response = Client._retry_request(method, list_url, retries=retries, expected_code=201)
+                response = Client._retry_request(method, list_url, retries=retries, expected_code=201,
+                                                 op=f"{op}_LIST_RETRY", obj_key=catalog)
                 files = response.json().get("data", [])
+                _log(op, catalog, "END", "SUCCESS", f"phase=LIST_RETRY;attempt={i+1};count={len(files)}")
             except Exception as e:
-                self.logger.error('CLIENT,LIST_CATALOG,%s,RETRY_ERROR,%s', catalog, e)
+                _log(op, catalog, "END", "ERROR", f"phase=LIST_RETRY;attempt={i+1};msg={e}")
                 break
             i += 1
 
-        self.logger.debug('CLIENT,LIST_CATALOG,%s,FILES_FINAL,count=%d', catalog, len(files))
-
+        paths = []
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-            self.logger.debug('CLIENT,LIST_CATALOG,%s,OUTPUT_DIR,CREATED,%s', catalog, output_dir)
+            _log(op, catalog, "END", "SUCCESS", f"phase=MKDIR;output_dir={output_dir}")
 
-        written = []
         try:
             for f in files:
                 key = f.get("token_file")
-                self.logger.debug('CLIENT,LIST_CATALOG,%s,GET_FILE,START,key=%s', catalog, key)
+                _log(op, key or "-", "START", "RUN", "phase=DOWNLOAD_FILE")
                 metadata = self.get_metadata(key, session=session)
                 data = self.get(key, session=session)
                 if data is None:
-                    self.logger.error('CLIENT,LIST_CATALOG,%s,GET_FILE,ERROR,key=%s,msg=download_failed', catalog, key)
+                    _log(op, key or "-", "END", "ERROR", "phase=DOWNLOAD_FILE;msg=null_data")
                     continue
                 if output_dir:
-                    output_path = os.path.join(output_dir, metadata.get("name", key))
-                    with open(output_path, "wb") as file_out:
-                        file_out.write(data)
-                    written.append(output_path)
-                    self.logger.debug('CLIENT,LIST_CATALOG,%s,GET_FILE,END,SAVED,key=%s,path=%s,bytes=%d',
-                                      catalog, key, output_path, len(data))
+                    out = os.path.join(output_dir, metadata.get("name", key))
+                    with open(out, "wb") as fo:
+                        fo.write(data)
+                    paths.append(out)
+                    _log(op, key or "-", "END", "SUCCESS", f"phase=WRITE_FILE;path={out};bytes={len(data)}")
         except Exception as e:
-            self.logger.exception('CLIENT,LIST_CATALOG,%s,ERROR,exception=%s', catalog, e)
+            _log(op, catalog, "END", "ERROR", f"phase=FILES_LOOP;msg={e}")
 
-        self.logger.debug('CLIENT,LIST_CATALOG,%s,END,SUCCESS,written_count=%d', catalog, len(written))
-        return written
+        _log(op, catalog, "END", "SUCCESS", f"written_count={len(paths)}")
+        return paths
 
     def put(self,
             data: bytes,
@@ -220,49 +223,42 @@ class Client(object):
             nodes=None,
             retries: int = 5):
 
-        start_time = time.perf_counter_ns()
         session = session or requests.Session()
-
-        # --- Metadata prep ---
         key = str(uuid.uuid4()) if key is None else key
         data_hash = hashlib.sha3_256(data).hexdigest()
         name = data_hash if name is None else name
 
-        self.logger.debug('CLIENT,PUT,%s,START,catalog=%s,name=%s,raw_bytes=%d,encrypted=%d,resiliency=%d,nodes=%d',
-                          key, catalog, name, len(data), int(is_encrypted), resiliency, len(nodes or []))
+        _log("PUT", key, "START", "RUN",
+             f"catalog={catalog};name={name};raw_bytes={len(data)};encrypted={int(is_encrypted)};"
+             f"resiliency={resiliency};nodes={len(nodes or [])}")
 
-        # Compression
-        t0 = time.perf_counter_ns()
+        # Compress
         try:
+            t0 = time.perf_counter_ns()
             data_compressed = self.object_compressor.compress(data)
+            _log("PUT", key, "END", "SUCCESS",
+                 f"phase=COMPRESS;bytes_in={len(data)};bytes_out={len(data_compressed)};"
+                 f"time_ms={(time.perf_counter_ns()-t0)/1e6:.3f};ratio={len(data_compressed)/max(1,len(data)):.4f}")
         except Exception as e:
-            self.logger.error('CLIENT,PUT,%s,COMPRESS,ERROR,%s', key, e)
+            _log("PUT", key, "END", "ERROR", f"phase=COMPRESS;msg={e}")
             raise CompressException(f'Compression failed: {str(e)}')
-        t1 = time.perf_counter_ns()
-        self.logger.debug('CLIENT,PUT,%s,COMPRESS,END,bytes_in=%d,bytes_out=%d,time_ms=%.3f,ratio=%.4f',
-                          key, len(data), len(data_compressed), (t1 - t0) / 1e6,
-                          (len(data_compressed) / max(1, len(data))))
 
-        # Encryption (optional)
-        if is_encrypted:
-            self.logger.debug('CLIENT,PUT,%s,ENCRYPT,START', key)
-        t0 = time.perf_counter_ns()
+        # Encrypt (optional)
         try:
+            t0 = time.perf_counter_ns()
             data_encrypted = self.object_encrypter.encrypt(data_compressed) if is_encrypted else data_compressed
+            if is_encrypted:
+                _log("PUT", key, "END", "SUCCESS",
+                     f"phase=ENCRYPT;bytes={len(data_encrypted)};time_ms={(time.perf_counter_ns()-t0)/1e6:.3f}")
         except Exception as e:
-            self.logger.error('CLIENT,PUT,%s,ENCRYPT,ERROR,%s', key, e)
+            _log("PUT", key, "END", "ERROR", f"phase=ENCRYPT;msg={e}")
             raise EncryptionException(f'Encryption failed: {str(e)}')
-        t1 = time.perf_counter_ns()
-        if is_encrypted:
-            self.logger.debug('CLIENT,PUT,%s,ENCRYPT,END,bytes=%d,time_ms=%.3f',
-                              key, len(data_encrypted), (t1 - t0) / 1e6)
 
         enc_len = len(data_encrypted)
         enc_hash = hashlib.sha3_256(data_encrypted).hexdigest()
         num_chunks = ceil(enc_len / MAX_CHUNK_LENGTH)
-
-        self.logger.debug('CLIENT,PUT,%s,DATA_READY,bytes=%d,hash_enc=%s,max_chunk_len=%d,num_chunks=%d',
-                          key, enc_len, enc_hash, MAX_CHUNK_LENGTH, num_chunks)
+        _log("PUT", key, "END", "SUCCESS",
+             f"phase=DATA_READY;bytes={enc_len};hash_enc={enc_hash};max_chunk_len={MAX_CHUNK_LENGTH};num_chunks={num_chunks}")
 
         payload = {
             "name": name,
@@ -274,106 +270,95 @@ class Client(object):
             "nodes": nodes or [],
         }
 
-        # --- Step 1: Send metadata ---
+        # Step 1: metadata
         metadata_url = f'http://{self.metadata_server}/metadata/{self.token_data["user_token"]}/{key}'
-        self.logger.debug('CLIENT,PUT,%s,METADATA,START,url=%s', key, metadata_url)
+        _log("PUT", key, "START", "RUN", f"phase=METADATA;url={metadata_url}")
         try:
-            t0 = time.perf_counter_ns()
-            metadata_resp = Client._retry_request(
-                session.post, metadata_url, retries=retries, expected_code=200, json=payload
-            )
-            t1 = time.perf_counter_ns()
-            self.logger.debug('CLIENT,PUT,%s,METADATA,END,SUCCESS,status=%d,time_ms=%.3f',
-                              key, metadata_resp.status_code, (t1 - t0) / 1e6)
+            metadata_resp = Client._retry_request(session.post, metadata_url, retries=retries, expected_code=200,
+                                                  json=payload, op="PUT_METADATA_HTTP", obj_key=key)
+            _log("PUT", key, "END", "SUCCESS", f"phase=METADATA;status={metadata_resp.status_code}")
         except Exception as e:
-            self.logger.error('CLIENT,PUT,%s,METADATA,END,ERROR,%s', key, e)
+            _log("PUT", key, "END", "ERROR", f"phase=METADATA;msg={e}")
             return None
 
-        # --- Step 2: Stream file content ---
+        # Step 2: upload
         upload_url = f'http://{self.metadata_server}/upload/{self.token_data["user_token"]}/{catalog}/{key}'
-        self.logger.debug('CLIENT,PUT,%s,UPLOAD,START,url=%s,num_chunks=%d', key, upload_url, num_chunks)
+        _log("PUT", key, "START", "RUN", f"phase=UPLOAD;url={upload_url};num_chunks={num_chunks}")
         try:
-            t0 = time.perf_counter_ns()
-            upload_resp = Client._retry_request(
-                session.put, upload_url, retries=retries, expected_code=201,
-                data=chunk_bytes(data_encrypted, MAX_CHUNK_LENGTH),
-                stream=True,
-                headers={"Content-Type": "application/octet-stream"}
-            )
-            t1 = time.perf_counter_ns()
-            self.logger.debug('CLIENT,PUT,%s,UPLOAD,END,SUCCESS,status=%d,time_ms=%.3f',
-                              key, upload_resp.status_code, (t1 - t0) / 1e6)
+            upload_resp = Client._retry_request(session.put, upload_url, retries=retries, expected_code=201,
+                                                data=chunk_bytes(data_encrypted, MAX_CHUNK_LENGTH),
+                                                stream=True,
+                                                headers={"Content-Type": "application/octet-stream"},
+                                                op="PUT_UPLOAD_HTTP", obj_key=key)
+            _log("PUT", key, "END", "SUCCESS", f"phase=UPLOAD;status={upload_resp.status_code}")
         except Exception as e:
-            self.logger.error('CLIENT,PUT,%s,UPLOAD,END,ERROR,%s', key, e)
+            _log("PUT", key, "END", "ERROR", f"phase=UPLOAD;msg={e}")
             return None
 
-        end = time.perf_counter_ns()
+        # Summary
         try:
             upload_json = upload_resp.json()
         except Exception:
             upload_json = {}
 
         result = {
-            "total_time": (end - start_time) / 1e6,
+            "total_time": None,  # not tracked here after refactor
             "metadata_time": metadata_resp.json().get("total_time", 0) / 1e6 if metadata_resp is not None else 0.0,
             "upload_time": upload_json.get("time_upload", 0) / 1e6,
             "key_object": key
         }
-
-        self.logger.debug('CLIENT,PUT,%s,END,SUCCESS,total_time_ms=%.3f,metadata_time_ms=%.3f,upload_time_ms=%.3f',
-                          key, result["total_time"], result["metadata_time"], result["upload_time"])
+        _log("PUT", key, "END", "SUCCESS",
+             f"phase=SUMMARY;metadata_time_ms={result['metadata_time']:.3f};upload_time_ms={result['upload_time']:.3f}")
         return result
 
     @staticmethod
-    def _retry_request(method, url, retries=5, retry_codes=(404,), expected_code=200, stream=False, **kwargs):
-        logger = logging.getLogger(__name__)
+    def _retry_request(method, url, retries=5, retry_codes=(404,), expected_code=200, stream=False,
+                       op="HTTP", obj_key="-", **kwargs):
         backoff = 1.0
         last_exception = None
         response = None
 
         for i in range(retries):
             try:
-                logger.debug('CLIENT,HTTP,REQUEST,TRY,%d,url=%s,expected=%d', i + 1, url, expected_code)
+                _log(op, obj_key, "START", "TRY",
+                     f"url={url};try={i+1}/{retries};expected={expected_code}")
                 response = method(url, stream=stream, **kwargs)
                 status = response.status_code
                 if status == expected_code:
-                    logger.debug('CLIENT,HTTP,REQUEST,SUCCESS,try=%d,status=%d,url=%s', i + 1, status, url)
+                    _log(op, obj_key, "END", "SUCCESS", f"url={url};status={status}")
                     return response
                 elif status in retry_codes and i < retries - 1:
-                    logger.debug('CLIENT,HTTP,REQUEST,RETRY,%d,status=%d,url=%s,backoff_s=%.1f',
-                                 i + 1, status, url, backoff)
+                    _log(op, obj_key, "END", "RETRY",
+                         f"url={url};status={status};backoff_s={backoff:.1f}")
                     time.sleep(backoff)
                     backoff *= 2
                 else:
-                    # Not retryable or no retries left
                     try:
                         response.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         last_exception = e
-                        logger.error('CLIENT,HTTP,REQUEST,ERROR,try=%d,status=%d,url=%s,msg=%s',
-                                     i + 1, status, url, e)
+                        _log(op, obj_key, "END", "ERROR", f"url={url};status={status};msg={e}")
                     break
             except requests.exceptions.RequestException as e:
                 last_exception = e
                 if i < retries - 1:
-                    logger.warning('CLIENT,HTTP,REQUEST,EXCEPTION,try=%d,url=%s,msg=%s,backoff_s=%.1f',
-                                   i + 1, url, e, backoff)
+                    _log(op, obj_key, "END", "RETRY",
+                         f"url={url};exception={e};backoff_s={backoff:.1f}")
                     time.sleep(backoff)
                     backoff *= 2
                 else:
-                    logger.error('CLIENT,HTTP,REQUEST,EXCEPTION,final,url=%s,msg=%s', url, e)
+                    _log(op, obj_key, "END", "ERROR", f"url={url};exception={e}")
 
-        # If we reach here, we failed
         body = None
         try:
             if response is not None:
                 body = response.text
         except Exception:
             body = None
-        msg = f"Failed to get a valid response after {retries} retries: {url}"
+        msg = f"url={url}"
         if body:
-            msg += f" | last_body={body[:512]}"
+            msg += f";last_body={body[:256]}"
         if last_exception:
-            msg += f" | exception={last_exception}"
-        logger.error('CLIENT,HTTP,REQUEST,FAIL,url=%s,msg=%s', url, msg)
-        raise RuntimeError(msg)
+            msg += f";exception={last_exception}"
+        _log(op, obj_key, "END", "FAIL", msg)
+        raise RuntimeError(f"Failed after {retries} retries: {url}")
