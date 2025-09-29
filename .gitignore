@@ -12,3 +12,4 @@ downloads/*
 
 files/*
 logs/*
+*.csv

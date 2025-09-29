@@ -5,6 +5,12 @@ import logging
 from pathlib import Path
 from dynostore.client import Client
 from logging.handlers import RotatingFileHandler
+from datetime import datetime, timezone
+
+class ISO8601UTCFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+        return dt.isoformat(timespec="milliseconds")  # 2025-09-10T14:47:10.114+00:00
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
 
@@ -14,23 +20,26 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
 CONSOLE_LEVEL = os.getenv("LOG_CONSOLE_LEVEL", "INFO").upper()
 FILE_LEVEL = os.getenv("LOG_FILE_LEVEL", LOG_LEVEL)
 
+level_int = getattr(logging, LOG_LEVEL, logging.DEBUG)
+
 os.makedirs(LOG_DIR, exist_ok=True)
 
-fmt = logging.Formatter("%(asctime)s,%(levelname)s,%(name)s,%(message)s")
+fmt_str = "%(asctime)s,%(levelname)s,%(name)s,%(message)s"
 
 root = logging.getLogger()
-root.setLevel(LOG_LEVEL)
+root.setLevel(level_int)
+root.handlers.clear()  # optional: avoid duplicate handlers on reload
 
 # Console
-ch = logging.StreamHandler()
-ch.setLevel(CONSOLE_LEVEL)
-ch.setFormatter(fmt)
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(level_int)
+ch.setFormatter(ISO8601UTCFormatter(fmt_str))
 root.addHandler(ch)
 
-# Rotating file (50 MB, keep 10 backups)
-fh = RotatingFileHandler(LOG_FILE, maxBytes=50 * 1024 * 1024, backupCount=10, encoding="utf-8")
-fh.setLevel(FILE_LEVEL)
-fh.setFormatter(fmt)
+# Rotating file
+fh = RotatingFileHandler(LOG_FILE, maxBytes=50*1024*1024, backupCount=10, encoding="utf-8")
+fh.setLevel(level_int)
+fh.setFormatter(ISO8601UTCFormatter(fmt_str))
 root.addHandler(fh)
 
 logger = logging.getLogger(__name__)
