@@ -42,14 +42,13 @@ class Client(object):
         t0 = time.perf_counter_ns()
         self.metadata_server = metadata_server
         self.object_compressor = ObjectCompressor()
-        self.object_encrypter = SecureObjectStore("aaaa")
-        _log("INIT", "-", "START", "RUN", f"metadata_server={metadata_server}")
+        self.object_encrypter = SecureObjectStore("my_secret_password") #ToDO: make password configurable
         authenticator = DeviceAuthenticator(auth_url=self.metadata_server)
         t_auth = time.perf_counter_ns()
         authenticator.authenticate()
         auth_ms = _ms(t_auth)
         self.token_data = authenticator.token_data
-        _log("INIT", "-", "END", "SUCCESS",
+        _log("AUTHENTICATION", "-", "-", "SUCCESS",
              f"user_token={self.token_data.get('user_token','NA')};auth_time_ms={auth_ms:.3f};total_time_ms={_ms(t0):.3f}")
 
     def evict(self, key: str, session: requests.Session = None, retries: int = 5) -> None:
@@ -109,16 +108,21 @@ class Client(object):
 
             data = bytearray()
             t_recv = time.perf_counter_ns()
-            for chunk in response.iter_content(chunk_size=None):
-                data += chunk
+            #for chunk in response.iter_content(chunk_size=None):
+            #    data += chunk
+            data = response.content
+
+            print("received data:", data)
+            
             recv_ms = (time.perf_counter_ns() - t_recv) / 1e6
             _log("GET", key, "END", "SUCCESS", f"phase=RECEIVE;bytes={len(data)};http_time_ms={http_ms:.3f};time_ms={recv_ms:.3f}")
 
-            if response.headers.get('is_encrypted', '0') == '1':
+            print("is_encrypted header:", response.headers)
+            if response.headers.get('is_encrypted', False):
                 try:
                     _log("GET", key, "START", "RUN", "phase=DECRYPT")
                     t_dec = time.perf_counter_ns()
-                    data = self.object_encrypter.decrypt(data)
+                    data = self.object_encrypter.decrypt_bytes(data)
                     _log("GET", key, "END", "SUCCESS",
                          f"phase=DECRYPT;bytes={len(data)};time_ms={(time.perf_counter_ns()-t_dec)/1e6:.3f}")
                 except Exception as e:
@@ -128,7 +132,9 @@ class Client(object):
             try:
                 _log("GET", key, "START", "RUN", "phase=DECOMPRESS")
                 t_decomp = time.perf_counter_ns()
+                print(data)
                 data = self.object_compressor.decompress(data)
+                print("decompressed data:", data)
                 out_bytes = 'None' if data is None else len(data)
                 _log("GET", key, "END", "SUCCESS",
                      f"phase=DECOMPRESS;bytes={out_bytes};time_ms={(time.perf_counter_ns()-t_decomp)/1e6:.3f}")
@@ -269,36 +275,34 @@ class Client(object):
 
         _log("PUT", key, "START", "RUN",
              f"catalog={catalog};name={name};raw_bytes={len(data)};encrypted={int(is_encrypted)};"
-             f"resiliency={resiliency};nodes={len(nodes or [])}")
+             f"resiliency={resiliency};")
 
         # Compress
         try:
             t_comp = time.perf_counter_ns()
             data_compressed = self.object_compressor.compress(data)
-            _log("PUT", key, "END", "SUCCESS",
+            _log("PUT", key, "COMPRESSING", "SUCCESS",
                  f"phase=COMPRESS;bytes_in={len(data)};bytes_out={len(data_compressed)};"
                  f"time_ms={(time.perf_counter_ns()-t_comp)/1e6:.3f};ratio={len(data_compressed)/max(1,len(data)):.4f}")
         except Exception as e:
-            _log("PUT", key, "END", "ERROR", f"phase=COMPRESS;msg={e};total_time_ms={_ms(t_total):.3f}")
+            _log("PUT", key, "COMPRESSING", "ERROR", f"msg={e};total_time_ms={_ms(t_total):.3f}")
             raise CompressException(f'Compression failed: {str(e)}')
 
         # Encrypt (optional)
         try:
             t_enc = time.perf_counter_ns()
-            data_encrypted = self.object_encrypter.encrypt(data_compressed) if is_encrypted else data_compressed
+            data_encrypted = self.object_encrypter.encrypt_bytes(data_compressed) if is_encrypted else data_compressed
             if is_encrypted:
-                _log("PUT", key, "END", "SUCCESS",
-                     f"phase=ENCRYPT;bytes={len(data_encrypted)};time_ms={(time.perf_counter_ns()-t_enc)/1e6:.3f}")
+                _log("PUT", key, "ENCRYPT", "SUCCESS",
+                     f"bytes={len(data_encrypted)};time_ms={(time.perf_counter_ns()-t_enc)/1e6:.3f}")
         except Exception as e:
-            _log("PUT", key, "END", "ERROR", f"phase=ENCRYPT;msg={e};total_time_ms={_ms(t_total):.3f}")
+            _log("PUT", key, "ENCRYPT", "ERROR", f"msg={e};total_time_ms={_ms(t_total):.3f}")
             raise EncryptionException(f'Encryption failed: {str(e)}')
 
         enc_len = len(data_encrypted)
         enc_hash = hashlib.sha3_256(data_encrypted).hexdigest()
         num_chunks = ceil(enc_len / MAX_CHUNK_LENGTH)
-        _log("PUT", key, "END", "SUCCESS",
-             f"phase=DATA_READY;bytes={enc_len};hash_enc={enc_hash};max_chunk_len={MAX_CHUNK_LENGTH};num_chunks={num_chunks}")
-
+        
         payload = {
             "name": name,
             "size": enc_len,
@@ -311,15 +315,14 @@ class Client(object):
 
         # Step 1: metadata
         metadata_url = f'http://{self.metadata_server}/metadata/{self.token_data["user_token"]}/{key}'
-        _log("PUT", key, "START", "RUN", f"phase=METADATA;url={metadata_url}")
         try:
             t_http = time.perf_counter_ns()
             metadata_resp = Client._retry_request(session.post, metadata_url, retries=retries, expected_code=200,
                                                   json=payload, op="PUT_METADATA_HTTP", obj_key=key)
             http_ms = (time.perf_counter_ns() - t_http) / 1e6
-            _log("PUT", key, "END", "SUCCESS", f"phase=METADATA;status={metadata_resp.status_code};http_time_ms={http_ms:.3f}")
+            _log("PUT", key, "METADATA_UPLOAD", "SUCCESS", f"status={metadata_resp.status_code};http_time_ms={http_ms:.3f}")
         except Exception as e:
-            _log("PUT", key, "END", "ERROR", f"phase=METADATA;msg={e};total_time_ms={_ms(t_total):.3f}")
+            _log("PUT", key, "METADATA_UPLOAD", "ERROR", f"msg={e};total_time_ms={_ms(t_total):.3f}")
             return None
 
         # Step 2: upload
@@ -333,9 +336,9 @@ class Client(object):
                                                 headers={"Content-Type": "application/octet-stream"},
                                                 op="PUT_UPLOAD_HTTP", obj_key=key)
             upload_http_ms = (time.perf_counter_ns() - t_http) / 1e6
-            _log("PUT", key, "END", "SUCCESS", f"phase=UPLOAD;status={upload_resp.status_code};http_time_ms={upload_http_ms:.3f}")
+            _log("PUT", key, "OBJECT_UPLOAD", "SUCCESS", f"status={upload_resp.status_code};http_time_ms={upload_http_ms:.3f}")
         except Exception as e:
-            _log("PUT", key, "END", "ERROR", f"phase=UPLOAD;msg={e};total_time_ms={_ms(t_total):.3f}")
+            _log("PUT", key, "OBJECT_UPLOAD", "ERROR", f"msg={e};total_time_ms={_ms(t_total):.3f}")
             return None
 
         # Summary
@@ -351,8 +354,8 @@ class Client(object):
             "upload_time": upload_json.get("time_upload", 0) / 1e6,  # server-reported ns -> ms (if present)
             "key_object": key
         }
-        _log("PUT", key, "END", "SUCCESS",
-             f"phase=SUMMARY;client_total_time_ms={result['total_time']:.3f};server_upload_time_ms={result['upload_time']:.3f}")
+        _log("PUT", key, "SUMMARY", "SUCCESS",
+             f"client_total_time_ms={result['total_time']:.3f}")
         return result
 
     @staticmethod
@@ -364,18 +367,13 @@ class Client(object):
 
         for i in range(retries):
             try:
-                _log(op, obj_key, "START", "TRY",
-                     f"url={url};try={i+1}/{retries};expected={expected_code}")
                 t_call = time.perf_counter_ns()
                 response = method(url, stream=stream, **kwargs)
                 dt_ms = (time.perf_counter_ns() - t_call) / 1e6
                 status = response.status_code
                 if status == expected_code:
-                    _log(op, obj_key, "END", "SUCCESS", f"url={url};status={status};time_ms={dt_ms:.3f}")
                     return response
                 elif status in retry_codes and i < retries - 1:
-                    _log(op, obj_key, "END", "RETRY",
-                         f"url={url};status={status};time_ms={dt_ms:.3f};backoff_s={backoff:.1f}")
                     time.sleep(backoff)
                     backoff *= 2
                 else:
@@ -383,13 +381,10 @@ class Client(object):
                         response.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         last_exception = e
-                        _log(op, obj_key, "END", "ERROR", f"url={url};status={status};time_ms={dt_ms:.3f};msg={e}")
                     break
             except requests.exceptions.RequestException as e:
                 last_exception = e
                 if i < retries - 1:
-                    _log(op, obj_key, "END", "RETRY",
-                         f"url={url};exception={e};backoff_s={backoff:.1f}")
                     time.sleep(backoff)
                     backoff *= 2
                 else:

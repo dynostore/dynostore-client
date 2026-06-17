@@ -8,12 +8,48 @@ import time
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Iterable
+from logging.handlers import RotatingFileHandler
+from datetime import datetime, timezone
 
 import requests
 from dynostore.client import Client
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s,%(name)s,%(message)s", stream=sys.stdout)
-logger = logging.getLogger("bench-dyno")
+class ISO8601UTCFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+        return dt.isoformat(timespec="milliseconds")  # 2025-09-10T14:47:10.114+00:00
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+
+LOG_DIR = os.getenv("LOG_DIR", "./logs")
+LOG_FILE = os.path.join(LOG_DIR, os.getenv("LOG_FILE", "dynostore.log"))
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+CONSOLE_LEVEL = os.getenv("LOG_CONSOLE_LEVEL", "INFO").upper()
+FILE_LEVEL = os.getenv("LOG_FILE_LEVEL", LOG_LEVEL)
+
+level_int = getattr(logging, LOG_LEVEL, logging.DEBUG)
+
+os.makedirs(LOG_DIR, exist_ok=True)
+
+fmt_str = "%(asctime)s,%(levelname)s,%(name)s,%(message)s"
+
+root = logging.getLogger()
+root.setLevel(level_int)
+root.handlers.clear()  # optional: avoid duplicate handlers on reload
+
+# Console
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(level_int)
+ch.setFormatter(ISO8601UTCFormatter(fmt_str))
+root.addHandler(ch)
+
+# Rotating file
+fh = RotatingFileHandler(LOG_FILE, maxBytes=50*1024*1024, backupCount=10, encoding="utf-8")
+fh.setLevel(level_int)
+fh.setFormatter(ISO8601UTCFormatter(fmt_str))
+root.addHandler(fh)
+
+logger = logging.getLogger(__name__)
 
 # ---------- Helpers ----------
 def human_size_to_bytes(s: str) -> int:
@@ -83,6 +119,7 @@ def poll_download_timeline(base_url: str, token_user: str, key: str,
             else:
                 r.raise_for_status()
                 last = r.json()
+                print(last)
                 if "pull_end" in last:
                     return last
         except requests.exceptions.RequestException as e:
@@ -103,6 +140,8 @@ def flatten_servers_info(servers_info: Any) -> Dict[str, Any]:
         else:
             flat[f"server[{i}]"] = json.dumps(item, ensure_ascii=False)
     return flat
+
+
 
 def write_csv(rows: List[Dict[str, Any]], base_order: List[str], path: str):
     if not rows:
@@ -279,7 +318,9 @@ def run_benchmark(
                     "server_pull_reconstruct_ms": duration_from_event(pull_tl.get("Object reconstruction", {})),
                     "server_pull_cache_ms": duration_from_event(pull_tl.get("Object caching", {})),
                 }
+                row.update(flatten_servers_info(pull_tl.get("server_chunk_times")))
                 rows_download.append(row)
+
                 logger.info(f"DOWN size={size_label} rep={j} key={seed_key} down_ms={local_download_ms:.3f} pull_ms={pull_total_ms}")
 
     # ---------- CSVs ----------

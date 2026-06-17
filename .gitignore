@@ -13,3 +13,4 @@ downloads/*
 files/*
 logs/*
 *.csv
+build/lib/*

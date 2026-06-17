@@ -18,4 +18,5 @@ class ObjectCompressor:
             obj = pickle.loads(decompressed_data)
             return obj
         except (pickle.UnpicklingError, zlib.error) as e:
+            print(f"Decompression failed: {e}")
             return None  # Return None if decompression fails

@@ -4,6 +4,7 @@ import sys
 import logging
 from pathlib import Path
 from dynostore.client import Client
+from dynostore.auth.authenticate import DeviceAuthenticator
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 
@@ -13,6 +14,7 @@ class ISO8601UTCFormatter(logging.Formatter):
         return dt.isoformat(timespec="milliseconds")  # 2025-09-10T14:47:10.114+00:00
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+
 
 LOG_DIR = os.getenv("LOG_DIR", "./logs")
 LOG_FILE = os.path.join(LOG_DIR, os.getenv("LOG_FILE", "dynostore.log"))
@@ -26,21 +28,27 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 fmt_str = "%(asctime)s,%(levelname)s,%(name)s,%(message)s"
 
-root = logging.getLogger()
-root.setLevel(level_int)
-root.handlers.clear()  # optional: avoid duplicate handlers on reload
+# root = logging.getLogger()
+# root.setLevel(level_int)
+# root.handlers.clear()  # optional: avoid duplicate handlers on reload
+
+# attach handlers to the dynostore package logger only
+pkg_logger = logging.getLogger("dynostore")
+pkg_logger.setLevel(level_int)
+pkg_logger.propagate = False  
+
 
 # Console
 ch = logging.StreamHandler(sys.stdout)
 ch.setLevel(level_int)
 ch.setFormatter(ISO8601UTCFormatter(fmt_str))
-root.addHandler(ch)
+pkg_logger.addHandler(ch)
 
 # Rotating file
 fh = RotatingFileHandler(LOG_FILE, maxBytes=50*1024*1024, backupCount=10, encoding="utf-8")
 fh.setLevel(level_int)
 fh.setFormatter(ISO8601UTCFormatter(fmt_str))
-root.addHandler(fh)
+pkg_logger.addHandler(fh)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +83,12 @@ def main():
     get_catalog_parser.add_argument('catalog', help='Catalog name to retrieve objects from')
     get_catalog_parser.add_argument('output', help='Output directory to write the catalog to')
 
+    # LOGIN / LOGOUT
+    login_parser = subparsers.add_parser('login', help='Authenticate and save a user token')
+    login_parser.add_argument('--force', action='store_true', help='Force re-authentication even if a token exists')
+
+    logout_parser = subparsers.add_parser('logout', help='Remove stored authentication token')
+
     # EXISTS
     exists_parser = subparsers.add_parser('exists', help='Check if object exists')
     exists_parser.add_argument('key', help='Key to check')
@@ -91,9 +105,19 @@ def main():
         format="%(asctime)s,%(levelname)s,%(name)s,%(message)s",
     )
 
-    client = Client(metadata_server=args.server)
-
     try:
+        if args.command == 'login':
+            authenticator = DeviceAuthenticator(auth_url=args.server)
+            authenticator.authenticate(force=args.force)
+            return 0
+
+        if args.command == 'logout':
+            authenticator = DeviceAuthenticator(auth_url=args.server)
+            authenticator.logout()
+            return 0
+
+        client = Client(metadata_server=args.server)
+
         if args.command == 'put':
             
             if args.recursive:

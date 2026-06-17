@@ -34,8 +34,15 @@ class DeviceAuthenticator:
             json.dump(token_data, f)
         print(f"🔐 Token saved at {self.token_file}")
 
-    def authenticate(self):
+    def logout(self):
         if os.path.exists(self.token_file):
+            os.remove(self.token_file)
+            print(f"🔓 Logged out. Token removed from {self.token_file}")
+        else:
+            print(f"⚠️ No token file found at {self.token_file}")
+
+    def authenticate(self, force: bool = False):
+        if os.path.exists(self.token_file) and not force:
             print(f"Token already exists at {self.token_file}. Skipping authentication.")
 
             # Load the existing token
@@ -44,6 +51,10 @@ class DeviceAuthenticator:
                 self.token_data = token_data
 
             return
+
+        if force and os.path.exists(self.token_file):
+            os.remove(self.token_file)
+            print(f"Existing token removed from {self.token_file} due to --force")
 
         print("Starting authentication process...")
         self.request_user_code()
