@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=64.0"]
+requires = ["setuptools>=64.0", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "dynostore"
-version = "0.0.396"
+dynamic = ["version"] 
 authors = [
     { name = "Dante D. Sanchez-Gallegos", email = "dantsanc@pa.uc3m.es" },
 ]
@@ -31,3 +31,5 @@ Issues = "https://github.com/dynostore/dynostore-client/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.setuptools_scm]
