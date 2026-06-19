@@ -111,8 +111,6 @@ class Client(object):
             #for chunk in response.iter_content(chunk_size=None):
             #    data += chunk
             data = response.content
-
-            print("received data:", data)
             
             recv_ms = (time.perf_counter_ns() - t_recv) / 1e6
             _log("GET", key, "END", "SUCCESS", f"phase=RECEIVE;bytes={len(data)};http_time_ms={http_ms:.3f};time_ms={recv_ms:.3f}")
@@ -132,9 +130,9 @@ class Client(object):
             try:
                 _log("GET", key, "START", "RUN", "phase=DECOMPRESS")
                 t_decomp = time.perf_counter_ns()
-                print(data)
+                
                 data = self.object_compressor.decompress(data)
-                print("decompressed data:", data)
+                
                 out_bytes = 'None' if data is None else len(data)
                 _log("GET", key, "END", "SUCCESS",
                      f"phase=DECOMPRESS;bytes={out_bytes};time_ms={(time.perf_counter_ns()-t_decomp)/1e6:.3f}")

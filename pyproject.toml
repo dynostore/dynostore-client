@@ -18,7 +18,8 @@ classifiers = [
 license = {text = "MIT"}
 dependencies = [
     "requests",
-    "cryptography"
+    "cryptography",
+    "cloudpickle"
 ]
 
 [project.scripts]
