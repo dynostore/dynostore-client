@@ -116,7 +116,7 @@ class Client(object):
             _log("GET", key, "END", "SUCCESS", f"phase=RECEIVE;bytes={len(data)};http_time_ms={http_ms:.3f};time_ms={recv_ms:.3f}")
 
             print("is_encrypted header:", response.headers)
-            if response.headers.get('is_encrypted', False):
+            if str(response.headers.get('is_encrypted', 'False')).lower() == 'true':
                 try:
                     _log("GET", key, "START", "RUN", "phase=DECRYPT")
                     t_dec = time.perf_counter_ns()
