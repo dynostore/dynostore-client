@@ -14,3 +14,6 @@ files/*
 logs/*
 *.csv
 build/lib/*
+build/lib/*
+build/*
+dynostore.egg-info/*
