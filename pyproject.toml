@@ -22,6 +22,13 @@ dependencies = [
     "cloudpickle"
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-mock",
+    "requests-mock"
+]
+
 [project.scripts]
 dynostore = "dynostore.cli:main"
 

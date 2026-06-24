@@ -96,3 +96,15 @@ Logging can be configured via environment variables:
 - `LOG_LEVEL`: Logging level (default: `DEBUG`).
 - `LOG_CONSOLE_LEVEL`: Logging level for standard output (default: `INFO`).
 - `LOG_FILE_LEVEL`: Logging level for the file (defaults to `LOG_LEVEL`).
+
+## Development
+
+To run the unit tests, you will need to install the optional testing dependencies. We recommend using a virtual environment.
+
+```bash
+# Install the client along with the test dependencies
+pip install ".[test]"
+
+# Run the test suite using pytest
+pytest tests/
+```
