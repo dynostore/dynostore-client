@@ -66,6 +66,7 @@ class Client(object):
                      f"status={response.status_code};http_time_ms={http_ms:.3f};total_time_ms={_ms(t0):.3f}")
         except Exception as e:
             _log("EVICT", key, "END", "ERROR", f"msg={e};total_time_ms={_ms(t0):.3f}")
+            raise RuntimeError(f"Evict failed: {e}")
         return
 
     def exists(self, key: str, session: requests.Session = None, retries: int = 5) -> bool:
@@ -84,7 +85,7 @@ class Client(object):
             return ok
         except Exception as e:
             _log("EXISTS", key, "END", "ERROR", f"msg={e};total_time_ms={_ms(t0):.3f}")
-            return False
+            raise RuntimeError(f"Exists check failed: {e}")
 
     def get(self, key: str, session: requests.Session = None, retries: int = 5) -> bytes:
         t_total = time.perf_counter_ns()
@@ -97,7 +98,7 @@ class Client(object):
         while retransmit and max_retries > 0:
             try:
                 t_call = time.perf_counter_ns()
-                response = Client._retry_request(method, url, retries=retries, retry_codes=(404,),
+                response = Client._retry_request(method, url, retries=retries, retry_codes=(404, 500, 502, 503, 504),
                                                  expected_code=200, stream=True, op="GET_HTTP", obj_key=key)
                 http_ms = (time.perf_counter_ns() - t_call) / 1e6
             except Exception as e:
@@ -148,7 +149,7 @@ class Client(object):
 
         if retransmit:
             _log("GET", key, "END", "ERROR", f"msg=Max retries reached;aborting;total_time_ms={_ms(t_total):.3f}")
-            return None
+            raise RuntimeError("Max retries reached; aborting GET operation")
 
         _log("GET", key, "END", "SUCCESS", f"FINAL_BYTES={len(data)};total_time_ms={_ms(t_total):.3f}")
         return bytes(data)
@@ -169,7 +170,7 @@ class Client(object):
             return meta
         except Exception as e:
             _log("GET_METADATA", key, "END", "ERROR", f"msg={e};total_time_ms={_ms(t0):.3f}")
-            return {}
+            raise RuntimeError(f"Get metadata failed: {e}")
 
     def get_files_in_catalog(self, catalog: str, output_dir: str = None,
                              session: requests.Session = None, retries: int = 5) -> list:
@@ -186,7 +187,7 @@ class Client(object):
             lookup_http_ms = (time.perf_counter_ns() - t_call) / 1e6
         except Exception as e:
             _log(op, catalog, "END", "ERROR", f"phase=LOOKUP;msg={e};total_time_ms={_ms(t_total):.3f}")
-            return []
+            raise RuntimeError(f"Catalog lookup failed: {e}")
 
         catalog_info = response.json().get("data", {})
         catalog_key = catalog_info.get("tokencatalog")
@@ -199,7 +200,7 @@ class Client(object):
             list_http_ms = (time.perf_counter_ns() - t_call) / 1e6
         except Exception as e:
             _log(op, catalog, "END", "ERROR", f"phase=LIST;msg={e};total_time_ms={_ms(t_total):.3f}")
-            return []
+            raise RuntimeError(f"Catalog list failed: {e}")
 
         files = response.json().get("data", [])
         _log(op, catalog, "END", "SUCCESS",
@@ -249,6 +250,7 @@ class Client(object):
                          f"phase=WRITE_FILE;path={out};bytes={len(data)};download_time_ms={dl_ms:.3f};write_time_ms={_ms(t_write):.3f}")
         except Exception as e:
             _log(op, catalog, "END", "ERROR", f"phase=FILES_LOOP;msg={e};total_time_ms={_ms(t_total):.3f}")
+            raise RuntimeError(f"Failed to download catalog files: {e}")
 
         _log(op, catalog, "END", "SUCCESS", f"written_count={len(paths)};total_time_ms={_ms(t_total):.3f}")
         return paths
@@ -320,7 +322,7 @@ class Client(object):
             _log("PUT", key, "METADATA_UPLOAD", "SUCCESS", f"status={metadata_resp.status_code};http_time_ms={http_ms:.3f}")
         except Exception as e:
             _log("PUT", key, "METADATA_UPLOAD", "ERROR", f"msg={e};total_time_ms={_ms(t_total):.3f}")
-            return None
+            raise RuntimeError(f"Put metadata failed: {e}")
 
         # Step 2: upload
         upload_url = f'http://{self.metadata_server}/upload/{self.token_data["user_token"]}/{catalog}/{key}'
@@ -336,7 +338,7 @@ class Client(object):
             _log("PUT", key, "OBJECT_UPLOAD", "SUCCESS", f"status={upload_resp.status_code};http_time_ms={upload_http_ms:.3f}")
         except Exception as e:
             _log("PUT", key, "OBJECT_UPLOAD", "ERROR", f"msg={e};total_time_ms={_ms(t_total):.3f}")
-            return None
+            raise RuntimeError(f"Put object failed: {e}")
 
         # Summary
         try:
@@ -356,7 +358,7 @@ class Client(object):
         return result
 
     @staticmethod
-    def _retry_request(method, url, retries=5, retry_codes=(404,), expected_code=200, stream=False,
+    def _retry_request(method, url, retries=5, retry_codes=(404, 500, 502, 503, 504), expected_code=200, stream=False,
                        op="HTTP", obj_key="-", **kwargs):
         backoff = 1.0
         last_exception = None
@@ -399,4 +401,4 @@ class Client(object):
         if last_exception:
             msg += f";exception={last_exception}"
         _log(op, obj_key, "END", "FAIL", msg)
-        raise RuntimeError(f"Failed after {retries} retries: {url}")
+        raise RuntimeError(f"Failed after {retries} retries: {url}. Details: {msg}")

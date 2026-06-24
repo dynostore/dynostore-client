@@ -153,15 +153,12 @@ def main():
 
         elif args.command == 'get':
             data = client.get(args.key)
-            if data is not None:
-                if args.output:
-                    with open(args.output, 'wb') as f:
-                        f.write(data)
-                else:
-                    # no prints by request; log a small preview
-                    preview = repr(data[:80])
+            if args.output:
+                with open(args.output, 'wb') as f:
+                    f.write(data)
             else:
-                _log("GET", args.key, "END", "ERROR", "null_data")
+                # no prints by request; log a small preview
+                preview = repr(data[:80])
 
         elif args.command == 'get_catalog':
             paths = client.get_files_in_catalog(args.catalog, output_dir=args.output)
@@ -173,6 +170,7 @@ def main():
             client.evict(args.key)
 
     except Exception as e:
+        print(f"Error executing command '{args.command}': {e}", file=sys.stderr)
         _log(args.command.upper(), getattr(args, "key", "-") or "-", "END", "ERROR", f"msg={e}")
         return 1
 
