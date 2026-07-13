@@ -19,7 +19,8 @@ license = {text = "MIT"}
 dependencies = [
     "httpx",
     "cryptography",
-    "cloudpickle"
+    "cloudpickle",
+    "requests"
 ]
 
 [project.optional-dependencies]
