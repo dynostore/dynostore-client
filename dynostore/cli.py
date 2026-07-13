@@ -131,6 +131,11 @@ async def async_main():
                 for filepath in dir_path.rglob('*'):
                     if filepath.is_file():
                         rel_path = filepath.relative_to(dir_path)
+
+                        # Ignore the log directory and its contents
+                        if rel_path.parts[0] == 'logs':
+                            continue
+
                         if rel_path.parent == Path('.'):
                             catalog_name = args.catalog
                         else:
