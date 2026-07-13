@@ -17,7 +17,7 @@ classifiers = [
 ]
 license = {text = "MIT"}
 dependencies = [
-    "requests",
+    "httpx",
     "cryptography",
     "cloudpickle"
 ]
@@ -26,7 +26,8 @@ dependencies = [
 test = [
     "pytest",
     "pytest-mock",
-    "requests-mock"
+    "pytest-asyncio",
+    "pytest-httpx"
 ]
 
 [project.scripts]

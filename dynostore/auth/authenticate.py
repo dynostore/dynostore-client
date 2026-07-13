@@ -1,4 +1,4 @@
-import requests
+import httpx
 import os
 import json
 
@@ -8,7 +8,7 @@ class DeviceAuthenticator:
         self.token_file = os.path.expanduser(token_file)
         
     def request_user_code(self):
-        resp = requests.post(f"{self.auth_url}/device/code")
+        resp = httpx.post(f"{self.auth_url}/device/code")
         resp.raise_for_status()
         data = resp.json()
         print(f"\nPlease go to {data['verification_uri']}")
@@ -19,7 +19,7 @@ class DeviceAuthenticator:
         return input("Paste the token shown in your browser here: ").strip()
 
     def validate_token(self, user_token):
-        resp = requests.post(f"{self.auth_url}/token/validate", json={"token": user_token})
+        resp = httpx.post(f"{self.auth_url}/token/validate", json={"token": user_token})
         if resp.status_code == 200:
             token_data = resp.json()
             print("✅ Access token received!")

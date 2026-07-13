@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import asyncio
 import csv
 import json
 import os
@@ -158,7 +159,7 @@ def write_csv(rows: List[Dict[str, Any]], base_order: List[str], path: str):
     logger.info(f"Saved {len(rows)} rows to {path}")
 
 # ---------- Core ----------
-def run_benchmark(
+async def run_benchmark(
     server: str,
     catalog: str,
     sizes_labels: List[str],
@@ -190,7 +191,7 @@ def run_benchmark(
             for i in range(count):
                 t0 = time.perf_counter_ns()
                 try:
-                    result = client.put(
+                    result = await client.put(
                         data=payload,
                         catalog=catalog,
                         is_encrypted=encrypt,
@@ -247,7 +248,7 @@ def run_benchmark(
             # 1) upload one seed per size
             logger.info(f"=== Seed for download: size {size_label} ({size_bytes} B) ===")
             try:
-                seed_result = client.put(
+                seed_result = await client.put(
                     data=payload,
                     catalog=catalog,
                     is_encrypted=encrypt,
@@ -277,7 +278,7 @@ def run_benchmark(
             for j in range(count):
                 t0 = time.perf_counter_ns()
                 try:
-                    data = client.get(seed_key)
+                    data = await client.get(seed_key)
                 except Exception as e:
                     logger.error(f"get failed size={size_label} rep={j} key={seed_key}: {e}")
                     data = None
@@ -383,7 +384,7 @@ def main():
     p.add_argument("--poll-interval", type=float, default=1.0, help="Seconds between timeline polls")
     args = p.parse_args()
 
-    run_benchmark(
+    asyncio.run(run_benchmark(
         server=args.server,
         catalog=args.catalog,
         sizes_labels=args.sizes,
@@ -396,7 +397,7 @@ def main():
         csv_download=args.csv_download,
         poll_timeout_s=args.poll_timeout,
         poll_interval_s=args.poll_interval,
-    )
+    ))
     return 0
 
 if __name__ == "__main__":

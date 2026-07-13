@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import decimal
 import re
-from typing import Generator
+from typing import AsyncGenerator, Generator
 
 
 def chunk_bytes(
@@ -18,6 +18,24 @@ def chunk_bytes(
 
     Returns:
         Generator that yields chunks of bytes.
+    """
+    length = len(data)
+    for index in range(0, length, chunk_size):
+        yield data[index : min(index + chunk_size, length)]
+
+
+async def async_chunk_bytes(
+    data: bytes,
+    chunk_size: int,
+) -> AsyncGenerator[bytes, None]:
+    """Asynchronously yield chunks of binary data.
+
+    Args:
+        data: Data to be chunked.
+        chunk_size: Chunk size in bytes.
+
+    Returns:
+        Async generator that yields chunks of bytes.
     """
     length = len(data)
     for index in range(0, length, chunk_size):
