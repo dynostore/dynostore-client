@@ -1,14 +1,16 @@
-import requests
+import httpx
+import asyncio
 import uuid
 import time
 import hashlib
 import os
 import logging
+import urllib.parse
 from math import ceil
 from dynostore.nfrs.compress import ObjectCompressor
 from dynostore.nfrs.cipher import SecureObjectStore
 from dynostore.auth.authenticate import DeviceAuthenticator
-from dynostore.utils.data import chunk_bytes
+from dynostore.utils.data import chunk_bytes, async_chunk_bytes
 from dynostore.constants import MAX_CHUNK_LENGTH
 
 
@@ -51,17 +53,17 @@ class Client(object):
         _log("AUTHENTICATION", "-", "-", "SUCCESS",
              f"user_token={self.token_data.get('user_token','NA')};auth_time_ms={auth_ms:.3f};total_time_ms={_ms(t0):.3f}")
 
-    def evict(self, key: str, session: requests.Session = None, retries: int = 5) -> None:
+    async def evict(self, key: str, session: httpx.AsyncClient = None, retries: int = 5) -> None:
         t0 = time.perf_counter_ns()
         _log("EVICT", key, "START", "RUN", "")
-        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
-        method = (session or requests).delete
+        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{urllib.parse.quote(key, safe="")}'
+        method = session.delete if session else httpx.AsyncClient().delete
         try:
             t_call = time.perf_counter_ns()
-            response = Client._retry_request(method, url, retries=retries, expected_code=200,
+            response = await Client._retry_request(method, url, retries=retries, expected_code=200,
                                              op="EVICT_HTTP", obj_key=key)
             http_ms = (time.perf_counter_ns() - t_call) / 1e6
-            if response.ok:
+            if response.is_success:
                 _log("EVICT", key, "END", "SUCCESS",
                      f"status={response.status_code};http_time_ms={http_ms:.3f};total_time_ms={_ms(t0):.3f}")
         except Exception as e:
@@ -69,14 +71,14 @@ class Client(object):
             raise RuntimeError(f"Evict failed: {e}")
         return
 
-    def exists(self, key: str, session: requests.Session = None, retries: int = 5) -> bool:
+    async def exists(self, key: str, session: httpx.AsyncClient = None, retries: int = 5) -> bool:
         t0 = time.perf_counter_ns()
         _log("EXISTS", key, "START", "RUN", "")
-        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}/exists'
-        method = (session or requests).get
+        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{urllib.parse.quote(key, safe="")}/exists'
+        method = session.get if session else httpx.AsyncClient().get
         try:
             t_call = time.perf_counter_ns()
-            response = Client._retry_request(method, url, retries=retries, expected_code=200,
+            response = await Client._retry_request(method, url, retries=retries, expected_code=200,
                                              op="EXISTS_HTTP", obj_key=key)
             http_ms = (time.perf_counter_ns() - t_call) / 1e6
             ok = response.json().get("exists", False)
@@ -87,18 +89,18 @@ class Client(object):
             _log("EXISTS", key, "END", "ERROR", f"msg={e};total_time_ms={_ms(t0):.3f}")
             raise RuntimeError(f"Exists check failed: {e}")
 
-    def get(self, key: str, session: requests.Session = None, retries: int = 5) -> bytes:
+    async def get(self, key: str, session: httpx.AsyncClient = None, retries: int = 5) -> bytes:
         t_total = time.perf_counter_ns()
         _log("GET", key, "START", "RUN", "")
-        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}'
-        method = (session or requests).get
+        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{urllib.parse.quote(key, safe="")}'
+        method = session.get if session else httpx.AsyncClient().get
         retransmit = True
         max_retries = 3
 
         while retransmit and max_retries > 0:
             try:
                 t_call = time.perf_counter_ns()
-                response = Client._retry_request(method, url, retries=retries, retry_codes=(404, 500, 502, 503, 504),
+                response = await Client._retry_request(method, url, retries=retries, retry_codes=(404, 500, 502, 503, 504),
                                                  expected_code=200, stream=True, op="GET_HTTP", obj_key=key)
                 http_ms = (time.perf_counter_ns() - t_call) / 1e6
             except Exception as e:
@@ -111,7 +113,7 @@ class Client(object):
             t_recv = time.perf_counter_ns()
             #for chunk in response.iter_content(chunk_size=None):
             #    data += chunk
-            data = response.content
+            data = response.read() if hasattr(response, 'read') else response.content
             
             recv_ms = (time.perf_counter_ns() - t_recv) / 1e6
             _log("GET", key, "END", "SUCCESS", f"phase=RECEIVE;bytes={len(data)};http_time_ms={http_ms:.3f};time_ms={recv_ms:.3f}")
@@ -154,14 +156,14 @@ class Client(object):
         _log("GET", key, "END", "SUCCESS", f"FINAL_BYTES={len(data)};total_time_ms={_ms(t_total):.3f}")
         return bytes(data)
 
-    def get_metadata(self, key: str, session: requests.Session = None, retries: int = 5) -> dict:
+    async def get_metadata(self, key: str, session: httpx.AsyncClient = None, retries: int = 5) -> dict:
         t0 = time.perf_counter_ns()
         _log("GET_METADATA", key, "START", "RUN", "")
-        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{key}/exists'
-        method = (session or requests).get
+        url = f'http://{self.metadata_server}/storage/{self.token_data["user_token"]}/{urllib.parse.quote(key, safe="")}/exists'
+        method = session.get if session else httpx.AsyncClient().get
         try:
             t_call = time.perf_counter_ns()
-            response = Client._retry_request(method, url, retries=retries, expected_code=200,
+            response = await Client._retry_request(method, url, retries=retries, expected_code=200,
                                              op="GET_METADATA_HTTP", obj_key=key)
             http_ms = (time.perf_counter_ns() - t_call) / 1e6
             meta = response.json().get("metadata", {})
@@ -172,35 +174,37 @@ class Client(object):
             _log("GET_METADATA", key, "END", "ERROR", f"msg={e};total_time_ms={_ms(t0):.3f}")
             raise RuntimeError(f"Get metadata failed: {e}")
 
-    def get_files_in_catalog(self, catalog: str, output_dir: str = None,
-                             session: requests.Session = None, retries: int = 5) -> list:
+    async def get_files_in_catalog(self, catalog: str, output_dir: str = None,
+                             session: httpx.AsyncClient = None, retries: int = 5) -> list:
         t_total = time.perf_counter_ns()
         op = "GET_CATALOG"
         _log(op, catalog, "START", "RUN", f"output_dir={output_dir}")
-        method = (session or requests).get
+        method = session.get if session else httpx.AsyncClient().get
 
-        catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog}'
+        catalog_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{urllib.parse.quote(catalog, safe="")}'
         try:
             t_call = time.perf_counter_ns()
-            response = Client._retry_request(method, catalog_url, retries=retries, expected_code=200,
+            response = await Client._retry_request(method, catalog_url, retries=retries, expected_code=200,
                                              op=f"{op}_LOOKUP", obj_key=catalog)
             lookup_http_ms = (time.perf_counter_ns() - t_call) / 1e6
         except Exception as e:
             _log(op, catalog, "END", "ERROR", f"phase=LOOKUP;msg={e};total_time_ms={_ms(t_total):.3f}")
             raise RuntimeError(f"Catalog lookup failed: {e}")
 
+        #print(f"Catalog info: {response}")
         catalog_info = response.json().get("data", {})
         catalog_key = catalog_info.get("tokencatalog")
 
-        list_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{catalog_key}/list'
+        list_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{urllib.parse.quote(catalog_key, safe="")}/list'
         try:
             t_call = time.perf_counter_ns()
-            response = Client._retry_request(method, list_url, retries=retries, expected_code=201,
+            response = await Client._retry_request(method, list_url, retries=retries, expected_code=201,
                                              op=f"{op}_LIST", obj_key=catalog)
             list_http_ms = (time.perf_counter_ns() - t_call) / 1e6
         except Exception as e:
             _log(op, catalog, "END", "ERROR", f"phase=LIST;msg={e};total_time_ms={_ms(t_total):.3f}")
             raise RuntimeError(f"Catalog list failed: {e}")
+
 
         files = response.json().get("data", [])
         _log(op, catalog, "END", "SUCCESS",
@@ -208,9 +212,10 @@ class Client(object):
 
         i = 0
         while not files and i < 10:
+            print(f"Catalog {catalog} is empty, retrying list (attempt {i+1}/10)...")
             try:
                 t_call = time.perf_counter_ns()
-                response = Client._retry_request(method, list_url, retries=retries, expected_code=201,
+                response = await Client._retry_request(method, list_url, retries=retries, expected_code=201,
                                                  op=f"{op}_LIST_RETRY", obj_key=catalog)
                 retry_http_ms = (time.perf_counter_ns() - t_call) / 1e6
                 files = response.json().get("data", [])
@@ -222,6 +227,30 @@ class Client(object):
                 break
             i += 1
 
+        # If we still have no files, we shall try with subcatalogs
+        sub_catalogs_url = f'http://{self.metadata_server}/pubsub/{self.token_data["user_token"]}/catalog/{urllib.parse.quote(catalog_key, safe="")}/children'
+
+        try:
+            t_call = time.perf_counter_ns()
+            response = await Client._retry_request(method, sub_catalogs_url, retries=retries, expected_code=200,
+                                             op=f"{op}_SUBCATALOGS", obj_key=catalog)
+            #print(f"Subcatalogs response: {response}")
+            subcatalogs_http_ms = (time.perf_counter_ns() - t_call) / 1e6
+            sub_catalogs = response.json().get("data", [])
+            _log(op, catalog, "END", "SUCCESS",
+                 f"phase=SUBCATALOGS;count={len(sub_catalogs)};http_time_ms={subcatalogs_http_ms:.3f}")
+            
+            for subcat in sub_catalogs:
+                subcat_name = subcat.get("namecatalog")
+                if not subcat_name:
+                    continue
+                subcat_files = await self.get_files_in_catalog(subcat_name, output_dir=f"{output_dir}/{subcat_name.split('_')[-1]}" if output_dir else None,
+                                                              session=session, retries=retries)
+            #    #files.extend(subcat_files)
+        except Exception as e:
+            _log(op, catalog, "END", "ERROR", f"phase=SUBCATALOGS;msg={e};total_time_ms={_ms(t_total):.3f}")
+            raise RuntimeError(f"Catalog subcatalogs failed: {e}")
+
         paths = []
         if output_dir:
             t_mkdir = time.perf_counter_ns()
@@ -229,25 +258,29 @@ class Client(object):
             _log(op, catalog, "END", "SUCCESS",
                  f"phase=MKDIR;output_dir={output_dir};time_ms={_ms(t_mkdir):.3f}")
 
+        async def _download_file(f):
+            key = f.get("token_file")
+            t_dl = time.perf_counter_ns()
+            _log(op, key or "-", "START", "RUN", "phase=DOWNLOAD_FILE")
+            metadata = await self.get_metadata(key, session=session)
+            data = await self.get(key, session=session)
+            dl_ms = _ms(t_dl)
+            if data is None:
+                _log(op, key or "-", "END", "ERROR", f"phase=DOWNLOAD_FILE;msg=null_data;time_ms={dl_ms:.3f}")
+                return None
+            if output_dir:
+                t_write = time.perf_counter_ns()
+                out = os.path.join(output_dir, metadata.get("name", key))
+                with open(out, "wb") as fo:
+                    fo.write(data)
+                _log(op, key or "-", "END", "SUCCESS",
+                     f"phase=WRITE_FILE;path={out};bytes={len(data)};download_time_ms={dl_ms:.3f};write_time_ms={_ms(t_write):.3f}")
+                return out
+            return None
+
         try:
-            for f in files:
-                key = f.get("token_file")
-                t_dl = time.perf_counter_ns()
-                _log(op, key or "-", "START", "RUN", "phase=DOWNLOAD_FILE")
-                metadata = self.get_metadata(key, session=session)
-                data = self.get(key, session=session)
-                dl_ms = _ms(t_dl)
-                if data is None:
-                    _log(op, key or "-", "END", "ERROR", f"phase=DOWNLOAD_FILE;msg=null_data;time_ms={dl_ms:.3f}")
-                    continue
-                if output_dir:
-                    t_write = time.perf_counter_ns()
-                    out = os.path.join(output_dir, metadata.get("name", key))
-                    with open(out, "wb") as fo:
-                        fo.write(data)
-                    paths.append(out)
-                    _log(op, key or "-", "END", "SUCCESS",
-                         f"phase=WRITE_FILE;path={out};bytes={len(data)};download_time_ms={dl_ms:.3f};write_time_ms={_ms(t_write):.3f}")
+            results = await asyncio.gather(*[_download_file(f) for f in files])
+            paths = [r for r in results if r is not None]
         except Exception as e:
             _log(op, catalog, "END", "ERROR", f"phase=FILES_LOOP;msg={e};total_time_ms={_ms(t_total):.3f}")
             raise RuntimeError(f"Failed to download catalog files: {e}")
@@ -255,19 +288,22 @@ class Client(object):
         _log(op, catalog, "END", "SUCCESS", f"written_count={len(paths)};total_time_ms={_ms(t_total):.3f}")
         return paths
 
-    def put(self,
+    async def put(self,
             data: bytes,
             catalog: str,
             key: str = None,
             name: str = None,
-            session: requests.Session = None,
+            session: httpx.AsyncClient = None,
             is_encrypted: bool = False,
             resiliency: int = 1,
             nodes=None,
             retries: int = 5):
 
         t_total = time.perf_counter_ns()
-        session = session or requests.Session()
+        close_session = False
+        if session is None:
+            session = httpx.AsyncClient()
+            close_session = True
         key = str(uuid.uuid4()) if key is None else key
         data_hash = hashlib.sha3_256(data).hexdigest()
         name = data_hash if name is None else name
@@ -313,10 +349,10 @@ class Client(object):
         }
 
         # Step 1: metadata
-        metadata_url = f'http://{self.metadata_server}/metadata/{self.token_data["user_token"]}/{key}'
+        metadata_url = f'http://{self.metadata_server}/metadata/{self.token_data["user_token"]}/{urllib.parse.quote(key, safe="")}'
         try:
             t_http = time.perf_counter_ns()
-            metadata_resp = Client._retry_request(session.post, metadata_url, retries=retries, expected_code=200,
+            metadata_resp = await Client._retry_request(session.post, metadata_url, retries=retries, expected_code=200,
                                                   json=payload, op="PUT_METADATA_HTTP", obj_key=key)
             http_ms = (time.perf_counter_ns() - t_http) / 1e6
             _log("PUT", key, "METADATA_UPLOAD", "SUCCESS", f"status={metadata_resp.status_code};http_time_ms={http_ms:.3f}")
@@ -325,13 +361,12 @@ class Client(object):
             raise RuntimeError(f"Put metadata failed: {e}")
 
         # Step 2: upload
-        upload_url = f'http://{self.metadata_server}/upload/{self.token_data["user_token"]}/{catalog}/{key}'
+        upload_url = f'http://{self.metadata_server}/upload/{self.token_data["user_token"]}/{urllib.parse.quote(catalog, safe="")}/{urllib.parse.quote(key, safe="")}'
         _log("PUT", key, "START", "RUN", f"phase=UPLOAD;url={upload_url};num_chunks={num_chunks}")
         try:
             t_http = time.perf_counter_ns()
-            upload_resp = Client._retry_request(session.put, upload_url, retries=retries, expected_code=201,
-                                                data=chunk_bytes(data_encrypted, MAX_CHUNK_LENGTH),
-                                                stream=True,
+            upload_resp = await Client._retry_request(session.put, upload_url, retries=retries, expected_code=201,
+                                                content=data_encrypted,
                                                 headers={"Content-Type": "application/octet-stream"},
                                                 op="PUT_UPLOAD_HTTP", obj_key=key)
             upload_http_ms = (time.perf_counter_ns() - t_http) / 1e6
@@ -355,36 +390,43 @@ class Client(object):
         }
         _log("PUT", key, "SUMMARY", "SUCCESS",
              f"client_total_time_ms={result['total_time']:.3f}")
+        if close_session:
+            await session.aclose()
         return result
 
     @staticmethod
-    def _retry_request(method, url, retries=5, retry_codes=(404, 500, 502, 503, 504), expected_code=200, stream=False,
+    async def _retry_request(method, url, retries=5, retry_codes=(404, 500, 502, 503, 504), expected_code=200, stream=False,
                        op="HTTP", obj_key="-", **kwargs):
         backoff = 1.0
         last_exception = None
         response = None
 
+        # httpx doesn't use stream kwargs in the method call for async clients in the same way, we'll strip it
         for i in range(retries):
             try:
                 t_call = time.perf_counter_ns()
-                response = method(url, stream=stream, **kwargs)
+                response = await method(url, **kwargs)
+                print(f"Response: {response.status_code}, {response.text}")
                 dt_ms = (time.perf_counter_ns() - t_call) / 1e6
                 status = response.status_code
                 if status == expected_code:
                     return response
                 elif status in retry_codes and i < retries - 1:
-                    time.sleep(backoff)
+                    await asyncio.sleep(backoff)
                     backoff *= 2
                 else:
                     try:
                         response.raise_for_status()
-                    except requests.exceptions.RequestException as e:
+                    except httpx.RequestError as e:
+                        last_exception = e
+                    except httpx.HTTPStatusError as e:
                         last_exception = e
                     break
-            except requests.exceptions.RequestException as e:
+            except httpx.RequestError as e:
+                print(f"Request error: {e}")
                 last_exception = e
                 if i < retries - 1:
-                    time.sleep(backoff)
+                    await asyncio.sleep(backoff)
                     backoff *= 2
                 else:
                     _log(op, obj_key, "END", "ERROR", f"url={url};exception={e}")
@@ -392,6 +434,8 @@ class Client(object):
         body = None
         try:
             if response is not None:
+                if stream and hasattr(response, "aread"):
+                    await response.aread()
                 body = response.text
         except Exception:
             body = None

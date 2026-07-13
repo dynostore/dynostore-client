@@ -140,8 +140,7 @@ async def async_main():
                             data = f.read()
 
                         print(f"Uploading {filepath} to catalog {catalog_name} with key {args.key or 'generated'}")
-                        tasks.append(asyncio.to_thread(
-                            client.put,
+                        tasks.append(client.put(
                             data=data,
                             catalog=catalog_name,
                             is_encrypted=args.encrypt,
@@ -157,8 +156,7 @@ async def async_main():
             else:
                 with open(args.file, 'rb') as f:
                     data = f.read()
-                result = await asyncio.to_thread(
-                    client.put,
+                result = await client.put(
                     data=data,
                     catalog=args.catalog,
                     is_encrypted=args.encrypt,
@@ -168,7 +166,7 @@ async def async_main():
                 obj_key = (result or {}).get("key_object", args.key or "-")
 
         elif args.command == 'get':
-            data = await asyncio.to_thread(client.get, args.key)
+            data = await client.get(args.key)
             if args.output:
                 with open(args.output, 'wb') as f:
                     f.write(data)
@@ -177,13 +175,13 @@ async def async_main():
                 preview = repr(data[:80])
 
         elif args.command == 'get_catalog':
-            paths = await asyncio.to_thread(client.get_files_in_catalog, args.catalog, output_dir=args.output)
+            paths = await client.get_files_in_catalog(args.catalog, output_dir=args.output)
 
         elif args.command == 'exists':
-            exists = await asyncio.to_thread(client.exists, args.key)
+            exists = await client.exists(args.key)
 
         elif args.command == 'evict':
-            await asyncio.to_thread(client.evict, args.key)
+            await client.evict(args.key)
 
     except Exception as e:
         print(f"Error executing command '{args.command}': {e}", file=sys.stderr)
